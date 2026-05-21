@@ -216,3 +216,26 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# FundPilot local runtime files
+docker/postgres/data/
+logs/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# Local environment variants
+.env.*
+!.env.example
+
+# Streamlit local state
+.streamlit/config.toml
+
+# Local generated exports and screenshots
+exports/
+reports/
+screenshots/
+
+# Local IDE state
+.idea/
