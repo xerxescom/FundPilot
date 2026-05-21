@@ -218,7 +218,6 @@ __marimo__/
 .streamlit/secrets.toml
 
 # FundPilot local runtime files
-docker/postgres/data/
 logs/
 *.sqlite
 *.sqlite3

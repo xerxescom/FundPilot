@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./docker/postgres/data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
 
   backend:
     build: .
@@ -30,3 +30,6 @@ services:
       - "8501:8501"
     env_file:
       - .env
+
+volumes:
+  postgres_data:
