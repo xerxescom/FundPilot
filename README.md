@@ -36,12 +36,47 @@ uv run streamlit run dashboard/streamlit_app.py
 
 ## 手动任务
 
+这些脚本是本地调试和手动跑批入口，不需要打开网页也能执行完整数据链路。建议按下面顺序运行：
+
+1. 添加自选基金：写入 `watchlist` 表。后续批量同步脚本只会处理这里面的 active 基金。
+
+```bash
+uv run python scripts/add_watchlist.py
+```
+
+2. 同步单只基金净值：手动输入基金代码，拉取历史净值并写入 `fund_nav`。注意：这个脚本不会自动加入自选列表。
+
 ```bash
 uv run python scripts/sync_fund_nav.py
+```
+
+3. 同步全部自选基金净值：读取 `watchlist` 中的 active 基金，批量更新净值。如果输出 `{}`，说明 `watchlist` 里没有 active 基金。
+
+```bash
 uv run python scripts/sync_watchlist_nav.py
+```
+
+4. 计算指标：基于 `fund_nav` 计算收益率、最大回撤、波动率、夏普比率和胜率，写入 `fund_indicator`。
+
+```bash
 uv run python scripts/calc_indicators.py
+```
+
+5. 计算评分：基于 `fund_indicator` 生成规则评分、评级和推荐理由，写入 `fund_score`。
+
+```bash
 uv run python scripts/calc_scores.py
+```
+
+6. 生成风险预警：检查大跌、回撤、评分下降和持仓集中度，写入 `alert_event`。
+
+```bash
 uv run python scripts/generate_alerts.py
+```
+
+7. 生成每日简报：使用 Ollama 生成 AI 简报；如果 Ollama 不可用，会使用规则兜底报告。
+
+```bash
 uv run python scripts/generate_daily_report.py
 ```
 
