@@ -32,6 +32,14 @@ def _fallback_report(data: dict) -> str:
     )
 
 
+def _fallback_with_error(data: dict, error: Exception | str) -> str:
+    return (
+        "AI 调用失败，已使用规则兜底\n"
+        f"失败原因：{error}\n\n"
+        f"{_fallback_report(data)}"
+    )
+
+
 def collect_daily_report_data(db: Session) -> dict:
     watchlist = db.scalars(select(Watchlist).where(Watchlist.is_active.is_(True))).all()
     scores = db.scalars(select(FundScore).order_by(FundScore.total_score.desc()).limit(10)).all()
@@ -63,9 +71,10 @@ def generate_daily_report(db: Session) -> AIReport:
     try:
         content = OllamaClient().generate(prompt)
         if not content:
-            content = _fallback_report(data)
-    except Exception:
-        content = _fallback_report(data)
+            content = _fallback_with_error(data, "Ollama 返回了空内容")
+            model_name = "rule-fallback"
+    except Exception as exc:
+        content = _fallback_with_error(data, exc)
         model_name = "rule-fallback"
     report = AIReport(
         report_type="daily",
@@ -94,8 +103,13 @@ def generate_fund_explanation(db: Session, fund_code: str) -> AIReport:
     model_name = get_settings().ollama_model
     try:
         content = OllamaClient().generate(prompt)
-    except Exception:
-        content = f"{fund_code} 当前使用规则解释：请结合收益率、最大回撤、波动率和评分原因综合观察。本说明不构成投资建议。"
+    except Exception as exc:
+        content = (
+            "AI 调用失败，已使用规则兜底\n"
+            f"失败原因：{exc}\n\n"
+            f"{fund_code} 当前使用规则解释：请结合收益率、最大回撤、波动率和评分原因综合观察。"
+            "本说明不构成投资建议。"
+        )
         model_name = "rule-fallback"
     report = AIReport(
         report_type="fund",

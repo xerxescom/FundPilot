@@ -88,6 +88,20 @@ uv run python scripts/generate_alerts.py
 uv run python scripts/generate_daily_report.py
 ```
 
+如果日报显示 `rule-fallback`，先检查 Ollama 是否可连接、模型是否存在：
+
+```bash
+uv run python scripts/check_ollama.py
+```
+
+如果模型存在但生成日报超时，可以调大 `.env` 里的 Ollama 超时时间，单位是秒：
+
+```env
+OLLAMA_TIMEOUT=120
+```
+
+大模型首次加载会比较慢。如果还是超时，可以先执行 `ollama run gemma4:latest "你好"` 预热模型，或把 `OLLAMA_TIMEOUT` 调到 `180` / `300`。
+
 ## Docker 启动
 
 ```bash

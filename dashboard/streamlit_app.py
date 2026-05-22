@@ -14,6 +14,7 @@ from app.services import (
     watchlist_service,
 )
 from app.services.ai.report_service import generate_daily_report, latest_report
+from app.services.ai.ollama_client import OllamaClient
 
 st.set_page_config(page_title="FundPilot", layout="wide", initial_sidebar_state="expanded")
 init_db()
@@ -23,6 +24,14 @@ RATING_COLORS = {
     "可以观察": "#2563eb",
     "一般": "#d97706",
     "暂不关注": "#6b7280",
+}
+
+PERIOD_OPTIONS = {
+    "近1月": 30,
+    "近3月": 90,
+    "近6月": 180,
+    "近1年": 365,
+    "全部": None,
 }
 
 st.markdown(
@@ -107,6 +116,28 @@ st.markdown(
         font-size: 0.78rem;
         font-weight: 650;
     }
+    .signal-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 13px 15px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    .signal-label {
+        color: #64748b;
+        font-size: 0.82rem;
+        margin-bottom: 4px;
+    }
+    .signal-value {
+        font-size: 1.35rem;
+        font-weight: 750;
+        line-height: 1.2;
+    }
+    .signal-hint {
+        color: #64748b;
+        font-size: 0.78rem;
+        margin-top: 4px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -139,6 +170,35 @@ def rating_badge(rating: str | None) -> str:
     label = rating or "未评分"
     color = RATING_COLORS.get(label, "#6b7280")
     return f'<span class="pill" style="background:{color}">{label}</span>'
+
+
+def metric_card(label: str, value: Decimal | float | int | None, kind: str = "return") -> None:
+    if value is None:
+        color = "#64748b"
+        display = "-"
+        hint = "暂无数据"
+    else:
+        numeric = float(value)
+        display = pct(numeric) if kind != "score" else score_value(numeric)
+        if kind == "risk":
+            color = "#dc2626" if numeric <= -0.20 else "#d97706" if numeric <= -0.08 else "#0f9f6e"
+            hint = "越接近 0 越稳"
+        elif kind == "score":
+            color = "#0f9f6e" if numeric >= 85 else "#2563eb" if numeric >= 70 else "#d97706" if numeric >= 60 else "#6b7280"
+            hint = "规则评分"
+        else:
+            color = "#dc2626" if numeric < 0 else "#0f9f6e"
+            hint = "正收益为绿"
+    st.markdown(
+        f"""
+        <div class="signal-card">
+            <div class="signal-label">{label}</div>
+            <div class="signal-value" style="color:{color}">{display}</div>
+            <div class="signal-hint">{hint}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def load_watchlist_codes() -> list[str]:
@@ -192,6 +252,14 @@ def nav_dataframe(nav_rows) -> pd.DataFrame:
     return df
 
 
+def filter_nav_period(df: pd.DataFrame, period_label: str) -> pd.DataFrame:
+    days = PERIOD_OPTIONS[period_label]
+    if df.empty or days is None:
+        return df
+    start = df["日期"].max() - pd.Timedelta(days=days)
+    return df[df["日期"] >= start].copy()
+
+
 def render_nav_chart(df: pd.DataFrame) -> None:
     fig = go.Figure()
     fig.add_trace(
@@ -201,6 +269,7 @@ def render_nav_chart(df: pd.DataFrame) -> None:
             mode="lines",
             name="单位净值",
             line={"color": "#2563eb", "width": 2},
+            hovertemplate="日期=%{x|%Y-%m-%d}<br>单位净值=%{y:.4f}<extra></extra>",
         )
     )
     fig.update_layout(
@@ -214,6 +283,8 @@ def render_nav_chart(df: pd.DataFrame) -> None:
         xaxis_title=None,
         yaxis_title="单位净值",
     )
+    fig.update_xaxes(showgrid=True, gridcolor="#eef2f7")
+    fig.update_yaxes(showgrid=True, gridcolor="#eef2f7")
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -231,6 +302,41 @@ def render_drawdown_chart(df: pd.DataFrame) -> None:
         yaxis_title="回撤",
         yaxis_tickformat=".0%",
     )
+    fig.update_xaxes(showgrid=True, gridcolor="#eef2f7")
+    fig.update_yaxes(showgrid=True, gridcolor="#eef2f7")
+    fig.update_traces(hovertemplate="日期=%{x|%Y-%m-%d}<br>回撤=%{y:.2%}<extra></extra>")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_daily_return_chart(df: pd.DataFrame) -> None:
+    if "日涨跌幅" not in df or df["日涨跌幅"].dropna().empty:
+        st.info("暂无日涨跌幅数据。")
+        return
+    chart_df = df.dropna(subset=["日涨跌幅"]).copy()
+    colors = chart_df["日涨跌幅"].map(lambda value: "#dc2626" if value < 0 else "#16a34a")
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=chart_df["日期"],
+            y=chart_df["日涨跌幅"],
+            marker_color=colors,
+            name="日涨跌幅",
+            hovertemplate="日期=%{x|%Y-%m-%d}<br>日涨跌幅=%{y:.2%}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        template="plotly_white",
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
+        font={"color": "#111827"},
+        height=280,
+        margin={"l": 10, "r": 10, "t": 20, "b": 10},
+        xaxis_title=None,
+        yaxis_title="日涨跌幅",
+        yaxis_tickformat=".1%",
+    )
+    fig.update_xaxes(showgrid=True, gridcolor="#eef2f7")
+    fig.update_yaxes(showgrid=True, gridcolor="#eef2f7", zeroline=True, zerolinecolor="#94a3b8")
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -391,20 +497,42 @@ elif page == "基金详情":
             st.info("已有指标数据，但还没有计算评分。点击上方“计算评分”。")
 
         metric_cols = st.columns(5)
-        metric_cols[0].metric("近1月收益", pct(indicator.return_1m if indicator else None))
-        metric_cols[1].metric("近3月收益", pct(indicator.return_3m if indicator else None))
-        metric_cols[2].metric("近1年收益", pct(indicator.return_1y if indicator else None))
-        metric_cols[3].metric("最大回撤", pct(indicator.max_drawdown_1y if indicator else None))
-        metric_cols[4].metric("总分", score_value(score.total_score if score else None))
+        with metric_cols[0]:
+            metric_card("近1月收益", indicator.return_1m if indicator else None)
+        with metric_cols[1]:
+            metric_card("近3月收益", indicator.return_3m if indicator else None)
+        with metric_cols[2]:
+            metric_card("近1年收益", indicator.return_1y if indicator else None)
+        with metric_cols[3]:
+            metric_card("最大回撤", indicator.max_drawdown_1y if indicator else None, kind="risk")
+        with metric_cols[4]:
+            metric_card("总分", score.total_score if score else None, kind="score")
 
         df = nav_dataframe(nav_rows)
         if df.empty:
             st.info("还没有净值数据，请先同步。")
         else:
-            section("净值走势")
-            render_nav_chart(df)
+            col_period, col_summary = st.columns([1, 3])
+            period_label = col_period.segmented_control(
+                "观察区间",
+                options=list(PERIOD_OPTIONS.keys()),
+                default="近1年",
+            )
+            filtered_df = filter_nav_period(df, period_label)
+            col_summary.caption(
+                f"当前区间：{filtered_df['日期'].min():%Y-%m-%d} 至 {filtered_df['日期'].max():%Y-%m-%d}，"
+                f"共 {len(filtered_df)} 条净值记录"
+            )
+
+            section("净值走势与日涨跌幅")
+            chart_left, chart_right = st.columns([1.35, 1])
+            with chart_left:
+                render_nav_chart(filtered_df)
+            with chart_right:
+                render_daily_return_chart(filtered_df)
+
             section("回撤曲线")
-            render_drawdown_chart(df)
+            render_drawdown_chart(filtered_df)
 
         section("指标明细")
         st.dataframe(
@@ -459,17 +587,32 @@ elif page == "评分排行":
 
 elif page == "AI 简报":
     section("每日基金简报", "基于自选基金、评分和预警生成；Ollama 不可用时使用规则兜底。")
-    col1, col2 = st.columns([1, 3])
+    col1, col2, col3 = st.columns([1, 1, 3])
     if col1.button("生成每日简报", use_container_width=True):
         with db_session() as db:
             report = generate_daily_report(db)
         st.success("已生成")
+        st.caption(f"生成方式：{report.model_name or 'unknown'}")
         st.markdown(report.content)
+    elif col2.button("测试 Ollama 连接", use_container_width=True):
+        try:
+            status = OllamaClient().check_model_available()
+            if status["model_available"]:
+                st.success(f"Ollama 可用，模型已找到：{status['configured_model']}")
+            else:
+                st.warning(
+                    f"Ollama 可连接，但没有找到配置模型：{status['configured_model']}。"
+                    "请确认模型名称或先执行 ollama pull。"
+                )
+            st.json(status)
+        except Exception as exc:
+            st.error(f"Ollama 连接失败：{exc}")
     else:
         with db_session() as db:
             report = latest_report(db)
         if report:
             st.caption(f"生成时间：{report.created_at:%Y-%m-%d %H:%M}")
+            st.caption(f"生成方式：{report.model_name or 'unknown'}")
             st.markdown(report.content)
         else:
             st.info("暂无简报。")
