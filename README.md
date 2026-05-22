@@ -34,6 +34,8 @@ curl http://127.0.0.1:8000/health
 uv run streamlit run dashboard/streamlit_app.py
 ```
 
+项目内置了 `.streamlit/config.toml`，会关闭 Streamlit usage stats，避免本地启动时因为访问 `data.streamlit.io` 超时而刷出网络错误。
+
 ## 手动任务
 
 这些脚本是本地调试和手动跑批入口，不需要打开网页也能执行完整数据链路。建议按下面顺序运行：
@@ -42,6 +44,12 @@ uv run streamlit run dashboard/streamlit_app.py
 
 ```bash
 uv run python scripts/add_watchlist.py
+```
+
+如果你已经有旧数据，可以回填自选基金名称：
+
+```bash
+uv run python scripts/backfill_watchlist_names.py
 ```
 
 2. 同步单只基金净值：手动输入基金代码，拉取历史净值并写入 `fund_nav`。注意：这个脚本不会自动加入自选列表。

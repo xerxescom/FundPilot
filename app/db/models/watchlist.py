@@ -12,6 +12,7 @@ class Watchlist(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     fund_code: Mapped[str] = mapped_column(String(20), index=True)
+    fund_name: Mapped[str | None] = mapped_column(String(255))
     group_name: Mapped[str] = mapped_column(String(100), default="default")
     note: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -1,13 +1,20 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.data_source.akshare_client import AkshareFundDataSource
 from app.db.models import Watchlist
 
 
 def add_watchlist_item(
-    db: Session, fund_code: str, group_name: str = "default", note: str | None = None
+    db: Session,
+    fund_code: str,
+    group_name: str = "default",
+    note: str | None = None,
+    fund_name: str | None = None,
 ) -> Watchlist:
     fund_code = fund_code.zfill(6)
+    if not fund_name:
+        fund_name = AkshareFundDataSource().get_fund_info(fund_code).get("fund_name")
     item = db.scalar(
         select(Watchlist).where(
             Watchlist.fund_code == fund_code,
@@ -16,9 +23,16 @@ def add_watchlist_item(
     )
     if item:
         item.is_active = True
+        item.fund_name = fund_name or item.fund_name
         item.note = note
     else:
-        item = Watchlist(fund_code=fund_code, group_name=group_name, note=note, is_active=True)
+        item = Watchlist(
+            fund_code=fund_code,
+            fund_name=fund_name,
+            group_name=group_name,
+            note=note,
+            is_active=True,
+        )
         db.add(item)
     db.commit()
     db.refresh(item)

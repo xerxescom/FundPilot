@@ -228,9 +228,6 @@ logs/
 .env.*
 !.env.example
 
-# Streamlit local state
-.streamlit/config.toml
-
 # Local generated exports and screenshots
 exports/
 reports/
