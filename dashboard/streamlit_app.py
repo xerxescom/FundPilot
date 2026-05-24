@@ -435,10 +435,23 @@ def ollama_status_rows(status: dict) -> list[dict]:
     labels = {
         "base_url": "服务地址",
         "configured_model": "配置模型",
+        "timeout_seconds": "超时时间",
+        "available_models": "本地模型列表",
         "model_available": "模型是否可用",
         "models": "本地模型列表",
     }
-    return [{"项目": labels.get(key, key), "值": value} for key, value in status.items()]
+    rows = []
+    for key, value in status.items():
+        if isinstance(value, list):
+            display_value = "、".join(str(item) for item in value) if value else "无"
+        elif isinstance(value, bool):
+            display_value = "是" if value else "否"
+        elif value is None:
+            display_value = ""
+        else:
+            display_value = str(value)
+        rows.append({"项目": labels.get(key, key), "值": display_value})
+    return rows
 
 
 def render_report_metadata(report) -> None:
