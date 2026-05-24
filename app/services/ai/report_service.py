@@ -7,17 +7,24 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import AIReport, AlertEvent, FundIndicator, FundInfo, FundScore, Watchlist
-from app.services import correlation_service, data_health_service, market_service, portfolio_service, score_service
+from app.services import (
+    correlation_service,
+    data_health_service,
+    market_service,
+    portfolio_service,
+    score_service,
+)
 from app.services.ai.ollama_client import OllamaClient
 from app.services.ai.prompt_templates import DAILY_REPORT_PROMPT, FUND_EXPLAIN_PROMPT
 
 FORBIDDEN_TERMS = ["立即买入", "立即卖出", "买入", "卖出", "重仓", "保证收益", "稳赚"]
+SAFE_REPLACEMENT = "继续观察"
 
 
 def _sanitize(content: str) -> str:
     cleaned = content
     for term in FORBIDDEN_TERMS:
-        cleaned = cleaned.replace(term, "继续观察")
+        cleaned = cleaned.replace(term, SAFE_REPLACEMENT)
     return cleaned.strip()
 
 
@@ -29,18 +36,22 @@ def _snapshot(data: dict) -> str:
     return json.dumps(data, ensure_ascii=False, default=str)[:8000]
 
 
+def _format_rate(value: object) -> str:
+    return "-" if value is None else f"{float(value):.2%}"
+
+
 def _fallback_report(data: dict) -> str:
     market_lines = [
-        f"- {item['index_name']}：日涨跌 {item['daily_return']:.2%}，近1月 {item['return_1m']:.2%}"
+        f"- {item['index_name']}：日涨跌 {_format_rate(item.get('daily_return'))}，近1月 {_format_rate(item.get('return_1m'))}"
         for item in data.get("market_context", [])
-        if item.get("daily_return") is not None and item.get("return_1m") is not None
+        if item.get("daily_return") is not None or item.get("return_1m") is not None
     ]
     portfolio = data.get("portfolio_overview", {})
     health = data.get("data_health", {})
     return (
         "今日概况\n"
-        "系统已基于本地净值、指标和评分数据生成规则摘要。"
-        f"当前需关注数据质量的基金数量：{health.get('stale_fund_count', 0)}。\n\n"
+        "系统已基于本地净值、指标和评分数据生成规则摘要。\n"
+        f"当前需要关注数据质量的基金数量：{health.get('stale_fund_count', 0)}。\n\n"
         "市场背景\n"
         f"{chr(10).join(market_lines) if market_lines else '暂无市场指数数据。'}\n\n"
         "组合表现\n"
@@ -174,6 +185,15 @@ def generate_daily_report(db: Session) -> AIReport:
     return report
 
 
+def _fallback_fund_explanation(fund_code: str, reason: Exception | str) -> str:
+    return (
+        "AI 调用失败，已使用规则兜底\n"
+        f"失败原因：{reason}\n\n"
+        f"{fund_code} 当前使用规则解释：请结合收益率、最大回撤、波动率和评分原因综合观察。"
+        "本说明不构成投资建议。"
+    )
+
+
 def generate_fund_explanation(db: Session, fund_code: str) -> AIReport:
     fund_code = fund_code.zfill(6)
     fund = db.scalar(select(FundInfo).where(FundInfo.fund_code == fund_code))
@@ -193,25 +213,21 @@ def generate_fund_explanation(db: Session, fund_code: str) -> AIReport:
     fallback_reason = None
     try:
         content = OllamaClient().generate(prompt)
-        forbidden = _contains_forbidden(content)
-        if forbidden:
-            fallback_reason = f"AI 输出包含受限表达：{forbidden}"
-            content = (
-                "AI 调用失败，已使用规则兜底\n"
-                f"失败原因：{fallback_reason}\n\n"
-                f"{fund_code} 当前使用规则解释：请结合收益率、最大回撤、波动率和评分原因综合观察。"
-                "本说明不构成投资建议。"
-            )
+        if not content:
+            fallback_reason = "Ollama 返回了空内容"
+            content = _fallback_fund_explanation(fund_code, fallback_reason)
             model_name = "rule-fallback"
             is_fallback = True
+        else:
+            forbidden = _contains_forbidden(content)
+            if forbidden:
+                fallback_reason = f"AI 输出包含受限表达：{forbidden}"
+                content = _fallback_fund_explanation(fund_code, fallback_reason)
+                model_name = "rule-fallback"
+                is_fallback = True
     except Exception as exc:
         fallback_reason = str(exc)
-        content = (
-            "AI 调用失败，已使用规则兜底\n"
-            f"失败原因：{exc}\n\n"
-            f"{fund_code} 当前使用规则解释：请结合收益率、最大回撤、波动率和评分原因综合观察。"
-            "本说明不构成投资建议。"
-        )
+        content = _fallback_fund_explanation(fund_code, exc)
         model_name = "rule-fallback"
         is_fallback = True
     report = AIReport(

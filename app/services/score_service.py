@@ -175,14 +175,9 @@ def calculate_watchlist_scores(db: Session) -> dict[str, str]:
 
 
 def top_scores(db: Session, limit: int = 20) -> list[FundScore]:
-    """返回每只基金最新一次评分，按总分降序取前 limit 条。
-
-    原实现把全部历史评分拉入内存再分组，当评分记录积累数月后会产生
-    大量不必要的数据传输。此版本改用子查询，在数据库层完成去重。
-    """
+    """Return each fund's latest score, ordered by total score descending."""
     from sqlalchemy import func
 
-    # 子查询：每个 fund_code 的最新 score_date
     latest_date_sq = (
         select(
             FundScore.fund_code,

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import ast
 from collections import Counter
 from datetime import date
-import ast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -81,7 +81,7 @@ def fund_data_health(db: Session, fund_code: str, today: date | None = None) -> 
         issues.append("尚未同步净值")
     if is_stale:
         status = "需关注"
-        issues.append("最新净值日期过旧")
+        issues.append("最新净值日期过时")
     if gap_count:
         status = "需关注"
         issues.append(f"存在 {gap_count} 处净值日期断档")

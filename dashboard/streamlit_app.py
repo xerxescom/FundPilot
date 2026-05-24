@@ -1,4 +1,4 @@
-import json
+﻿import json
 from datetime import date
 from decimal import Decimal
 
@@ -210,7 +210,6 @@ def score_value(value: Decimal | float | int | None) -> str:
 def date_value(value) -> str:
     return "暂无" if value is None else str(value)
 
-
 def section(title: str, caption: str | None = None) -> None:
     st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
     if caption:
@@ -221,7 +220,6 @@ def rating_badge(rating: str | None) -> str:
     label = rating or "未评分"
     color = RATING_COLORS.get(label, "#6b7280")
     return f'<span class="pill" style="background:{color}">{label}</span>'
-
 
 def rating_guide() -> None:
     items = [

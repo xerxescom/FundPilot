@@ -116,8 +116,8 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
                 "portfolio_drawdown",
                 None,
                 "medium",
-                "组合近 1 月回撤超过 8%",
-                f"当前估算近 1 月组合最大回撤为 {drawdown_1m:.2%}",
+                "组合近1月回撤超过 8%",
+                f"当前估算近1月组合最大回撤为 {drawdown_1m:.2%}",
             )
         )
     return alerts

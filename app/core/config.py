@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     backend_port: int = 8000
     streamlit_port: int = 8501
     sync_nav_cron: str = "18:00"
+    enable_scheduler: bool = False
+    auto_create_tables: bool = True
     ai_provider: str = "ollama"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:14b"

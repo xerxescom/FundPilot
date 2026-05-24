@@ -28,4 +28,4 @@ def test_data_health_detects_stale_missing_return_and_pending_indicator(db_sessi
     assert overview["stale_fund_count"] == 1
     assert overview["pending_indicator_count"] == 1
     assert overview["missing_daily_return_count"] == 1
-    assert "最新净值日期过旧" in overview["funds"][0]["issues"]
+    assert "最新净值日期过时" in overview["funds"][0]["issues"]

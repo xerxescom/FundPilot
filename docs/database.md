@@ -16,9 +16,11 @@
 
 ## 迁移策略
 
-当前开发环境仍保留 `create_all()` 方便快速启动。后续新增字段和表建议优先使用 Alembic：
+正式路径优先使用 Alembic：
 
 ```bash
-uv run alembic revision --autogenerate -m "describe change"
 uv run alembic upgrade head
+uv run alembic revision --autogenerate -m "describe change"
 ```
+
+开发环境可以保留 `AUTO_CREATE_TABLES=true` 快速启动。`APP_ENV=dev` 时，系统会执行少量兼容性补列逻辑，用于早期本地库从 `create_all()` 迁移到 Alembic 的过渡。

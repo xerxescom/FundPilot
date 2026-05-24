@@ -37,6 +37,10 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
+    settings = get_settings()
+    if not settings.auto_create_tables:
+        return
+
     from app.db.models import (  # noqa: F401
         alert,
         ai_report,
@@ -52,7 +56,8 @@ def init_db() -> None:
     from app.db.base import Base
 
     Base.metadata.create_all(bind=engine)
-    ensure_schema_compatibility()
+    if settings.app_env == "dev":
+        ensure_schema_compatibility()
 
 
 def ensure_schema_compatibility() -> None:
