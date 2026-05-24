@@ -23,7 +23,7 @@
       <div class="panel">
         <h2 class="section-title">持仓列表</h2>
         <el-table :data="positionRows" border stripe>
-          <el-table-column prop="id" label="ID" width="80" />
+          <el-table-column prop="id" label="编号 (ID)" width="90" />
           <el-table-column prop="fund_code" label="基金代码" />
           <el-table-column prop="holding_share" label="持有份额" />
           <el-table-column prop="latest_nav" label="最新净值" />
@@ -45,7 +45,7 @@
     <div class="section panel">
       <h2 class="section-title">买入记录</h2>
       <el-table :data="transactions" border stripe>
-        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="id" label="编号 (ID)" width="90" />
         <el-table-column prop="fund_code" label="基金代码" />
         <el-table-column prop="trade_date" label="买入日期" />
         <el-table-column prop="amount" label="买入金额" />

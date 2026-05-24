@@ -8,9 +8,9 @@
         <el-button @click="generateAlerts">生成高相关预警</el-button>
       </div>
       <el-table :data="pairs" border stripe>
-        <el-table-column prop="fund_a" label="基金A" />
-        <el-table-column prop="fund_b" label="基金B" />
-        <el-table-column prop="correlation" label="相关系数" />
+        <el-table-column prop="fund_a" label="基金A (fund_a)" />
+        <el-table-column prop="fund_b" label="基金B (fund_b)" />
+        <el-table-column prop="correlation" label="相关系数 (correlation)" />
       </el-table>
     </div>
     <div class="section panel">
@@ -19,7 +19,7 @@
     </div>
     <div class="section panel">
       <h2 class="section-title">相关矩阵</h2>
-      <pre class="json-box">{{ JSON.stringify(matrix, null, 2) }}</pre>
+      <AutoTable :rows="matrixRows" />
     </div>
   </div>
 </template>
@@ -30,6 +30,7 @@ import { computed, onMounted, ref } from "vue";
 
 import { api } from "../api/fundpilot";
 import type { WatchlistItem } from "../api/types";
+import AutoTable from "../components/AutoTable.vue";
 import ChartBox from "../components/ChartBox.vue";
 import FundSelector from "../components/FundSelector.vue";
 
@@ -39,6 +40,12 @@ const matrix = ref<Record<string, Record<string, number>>>({});
 const returns = ref<Array<Record<string, unknown>>>([]);
 const fundA = ref<string>();
 const fundB = ref<string>();
+const matrixRows = computed(() =>
+  Object.entries(matrix.value).map(([fundCode, values]) => ({
+    fund_code: fundCode,
+    ...values,
+  })),
+);
 const lineOption = computed(() => ({
   tooltip: { trigger: "axis" },
   xAxis: { type: "category", data: returns.value.map((row) => row.nav_date) },
@@ -70,10 +77,3 @@ onMounted(async () => {
   await loadPair();
 });
 </script>
-
-<style scoped>
-.json-box {
-  max-height: 320px;
-  overflow: auto;
-}
-</style>

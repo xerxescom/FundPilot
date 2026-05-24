@@ -22,6 +22,7 @@ import { ElMessage } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
 import { api } from "../api/fundpilot";
+import { fieldLabel } from "../api/labels";
 import type { Report } from "../api/types";
 import ReportCard from "../components/ReportCard.vue";
 
@@ -29,7 +30,7 @@ const report = ref<Report | null>(null);
 const ollamaStatus = ref<Record<string, unknown> | null>(null);
 const statusRows = computed(() =>
   Object.entries(ollamaStatus.value || {}).map(([key, value]) => ({
-    项目: key,
+    项目: fieldLabel(key),
     值: Array.isArray(value) ? value.join("、") : String(value),
   })),
 );
