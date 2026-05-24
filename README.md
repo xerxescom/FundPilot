@@ -52,6 +52,12 @@ uv run python scripts/add_watchlist.py
 uv run python scripts/backfill_watchlist_names.py
 ```
 
+同步市场背景数据，供首页市场概览和 AI 日报引用：
+
+```bash
+uv run python scripts/sync_market_context.py
+```
+
 2. 同步单只基金净值：手动输入基金代码，拉取历史净值并写入 `fund_nav`。注意：这个脚本不会自动加入自选列表。
 
 ```bash
@@ -101,6 +107,36 @@ OLLAMA_TIMEOUT=120
 ```
 
 大模型首次加载会比较慢。如果还是超时，可以先执行 `ollama run gemma4:latest "你好"` 预热模型，或把 `OLLAMA_TIMEOUT` 调到 `180` / `300`。
+
+查看组合概况和基金相关性：
+
+```bash
+uv run python scripts/calc_portfolio_risk.py
+uv run python scripts/calc_fund_correlation.py
+```
+
+## 数据流
+
+```text
+watchlist -> sync_nav -> fund_nav -> indicators -> scores -> dashboard/report
+market indexes -> market_index_daily -> market context -> dashboard/report
+portfolio_position + latest nav -> portfolio overview -> alerts/report
+fund_nav daily_return -> correlation matrix -> high-correlation alerts
+```
+
+## 数据库迁移
+
+项目已加入 Alembic 脚手架。当前本地开发仍保留 `create_all()` 以方便快速启动；后续新增表和字段建议走迁移：
+
+```bash
+uv run alembic upgrade head
+```
+
+如果要生成新迁移：
+
+```bash
+uv run alembic revision --autogenerate -m "describe change"
+```
 
 ## Docker 启动
 

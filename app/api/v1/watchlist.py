@@ -11,7 +11,7 @@ router = APIRouter()
 @router.post("", response_model=WatchlistOut)
 def add_watchlist(payload: WatchlistCreate, db: Session = Depends(get_db)):
     return watchlist_service.add_watchlist_item(
-        db, payload.fund_code, payload.group_name, payload.note, payload.fund_name
+        db, payload.fund_code, payload.group_name, payload.note, payload.fund_name, payload.industry
     )
 
 

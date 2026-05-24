@@ -39,3 +39,11 @@ class PortfolioSummary(BaseModel):
     current_value: Decimal | None
     profit_amount: Decimal | None
     profit_rate: Decimal | None
+
+
+class PortfolioOverview(BaseModel):
+    total_value: Decimal
+    total_cost: Decimal | None
+    profit_amount: Decimal | None
+    profit_rate: Decimal | None
+    positions: list[PortfolioSummary]

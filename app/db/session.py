@@ -18,7 +18,17 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    from app.db.models import alert, ai_report, fund, indicator, portfolio, score, watchlist  # noqa: F401
+    from app.db.models import (  # noqa: F401
+        alert,
+        ai_report,
+        fund,
+        indicator,
+        market,
+        portfolio,
+        score,
+        task_log,
+        watchlist,
+    )
 
     from app.db.base import Base
 
@@ -39,11 +49,14 @@ def ensure_schema_compatibility() -> None:
         return
 
     columns = {column["name"] for column in inspector.get_columns("watchlist")}
-    if "fund_name" in columns:
-        return
+    missing_columns = {
+        "fund_name": "VARCHAR(255)",
+        "industry": "VARCHAR(100)",
+    }
 
     with engine.begin() as conn:
-        if engine.dialect.name == "postgresql":
-            conn.execute(text("ALTER TABLE watchlist ADD COLUMN fund_name VARCHAR(255)"))
-        elif engine.dialect.name == "sqlite":
-            conn.execute(text("ALTER TABLE watchlist ADD COLUMN fund_name VARCHAR(255)"))
+        for column_name, column_type in missing_columns.items():
+            if column_name in columns:
+                continue
+            if engine.dialect.name in {"postgresql", "sqlite"}:
+                conn.execute(text(f"ALTER TABLE watchlist ADD COLUMN {column_name} {column_type}"))

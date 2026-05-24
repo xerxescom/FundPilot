@@ -2,8 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.portfolio import PortfolioCreate, PortfolioOut, PortfolioSummary, PortfolioUpdate
-from app.services import portfolio_service
+from app.schemas.portfolio import (
+    PortfolioCreate,
+    PortfolioOut,
+    PortfolioOverview,
+    PortfolioSummary,
+    PortfolioUpdate,
+)
+from app.services import correlation_service, portfolio_service
 
 router = APIRouter()
 
@@ -21,6 +27,17 @@ def list_positions(db: Session = Depends(get_db)):
 @router.get("/summary", response_model=list[PortfolioSummary])
 def list_position_summaries(db: Session = Depends(get_db)):
     return [portfolio_service.position_summary(db, item) for item in portfolio_service.list_positions(db)]
+
+
+@router.get("/overview", response_model=PortfolioOverview)
+def portfolio_overview(db: Session = Depends(get_db)):
+    return portfolio_service.portfolio_overview(db)
+
+
+@router.get("/correlation")
+def portfolio_correlation(db: Session = Depends(get_db)):
+    corr = correlation_service.calculate_correlation(db)
+    return {} if corr.empty else corr.round(4).to_dict()
 
 
 @router.put("/{position_id}", response_model=PortfolioOut)

@@ -4,12 +4,16 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 
 from app.db.session import SessionLocal, init_db
 from app.services import (
     alert_service,
+    correlation_service,
     indicator_service,
+    market_service,
     nav_service,
+    portfolio_service,
     score_service,
     watchlist_service,
 )
@@ -66,8 +70,12 @@ st.markdown(
         background: #ffffff;
         border: 1px solid #e5e7eb;
         border-radius: 8px;
-        padding: 14px 16px;
+        padding: 16px 16px;
         box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        min-height: 116px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     [data-testid="stMetric"] label,
     [data-testid="stMetric"] [data-testid="stMetricValue"] {
@@ -122,6 +130,10 @@ st.markdown(
         border-radius: 8px;
         padding: 13px 15px;
         box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        min-height: 104px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
     }
     .signal-label {
         color: #64748b;
@@ -137,6 +149,34 @@ st.markdown(
         color: #64748b;
         font-size: 0.78rem;
         margin-top: 4px;
+    }
+    .task-button-note {
+        color: #64748b;
+        font-size: 0.82rem;
+        margin: -0.4rem 0 0.7rem;
+        min-height: 2.2rem;
+    }
+    .rating-guide {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin: 0.5rem 0 0.9rem;
+    }
+    .rating-guide-item {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 10px 12px;
+        min-height: 72px;
+    }
+    .rating-guide-title {
+        font-size: 0.9rem;
+        font-weight: 750;
+        margin-bottom: 4px;
+    }
+    .rating-guide-range {
+        color: #64748b;
+        font-size: 0.82rem;
     }
     </style>
     """,
@@ -170,6 +210,25 @@ def rating_badge(rating: str | None) -> str:
     label = rating or "未评分"
     color = RATING_COLORS.get(label, "#6b7280")
     return f'<span class="pill" style="background:{color}">{label}</span>'
+
+
+def rating_guide() -> None:
+    items = [
+        ("重点关注", "85 分及以上", RATING_COLORS["重点关注"]),
+        ("可以观察", "70-84.99 分", RATING_COLORS["可以观察"]),
+        ("一般", "60-69.99 分", RATING_COLORS["一般"]),
+        ("暂不关注", "60 分以下", RATING_COLORS["暂不关注"]),
+    ]
+    html = '<div class="rating-guide">'
+    for title, score_range, color in items:
+        html += (
+            '<div class="rating-guide-item">'
+            f'<div class="rating-guide-title" style="color:{color}">{title}</div>'
+            f'<div class="rating-guide-range">{score_range}</div>'
+            "</div>"
+        )
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def metric_card(label: str, value: Decimal | float | int | None, kind: str = "return") -> None:
@@ -209,8 +268,20 @@ def load_watchlist_codes() -> list[str]:
         ]
 
 
+def watchlist_name_map() -> dict[str, str]:
+    with db_session() as db:
+        return {
+            item.fund_code: f"{item.fund_code} {item.fund_name}" if item.fund_name else item.fund_code
+            for item in watchlist_service.list_watchlist_items(db)
+        }
+
+
 def selected_code(value: str | None) -> str:
     return (value or "").split(" ", 1)[0].strip()
+
+
+def status_label(is_active: bool) -> str:
+    return "启用 ✓" if is_active else "停用 -"
 
 
 def analyze_fund(db, fund_code: str) -> tuple[object, object]:
@@ -231,6 +302,28 @@ def score_rows(scores) -> list[dict]:
             "推荐理由": item.reason,
         }
         for item in scores
+    ]
+
+
+def label_score_rows(rows: list[dict], labels: dict[str, str]) -> list[dict]:
+    return [{**row, "基金": labels.get(row["基金代码"], row["基金代码"])} for row in rows]
+
+
+def money(value: Decimal | float | int | None) -> str:
+    return "-" if value is None else f"{float(value):,.2f}"
+
+
+def market_rows(market_context: list[dict]) -> list[dict]:
+    return [
+        {
+            "指数": item["index_name"],
+            "日期": item.get("trade_date"),
+            "收盘": item.get("close"),
+            "日涨跌": pct(item.get("daily_return")),
+            "近1月": pct(item.get("return_1m")),
+            "来源": item.get("source") or "-",
+        }
+        for item in market_context
     ]
 
 
@@ -340,11 +433,94 @@ def render_daily_return_chart(df: pd.DataFrame) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
+def render_aligned_fund_charts(df: pd.DataFrame) -> None:
+    if df.empty:
+        st.info("暂无可展示的图表数据。")
+        return
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.045,
+        row_heights=[0.48, 0.28, 0.24],
+        subplot_titles=("单位净值", "回撤", "日涨跌幅"),
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["日期"],
+            y=df["单位净值"],
+            mode="lines",
+            name="单位净值",
+            line={"color": "#2563eb", "width": 2.2},
+            hovertemplate="日期=%{x|%Y-%m-%d}<br>单位净值=%{y:.4f}<extra></extra>",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["日期"],
+            y=df["回撤"],
+            mode="lines",
+            fill="tozeroy",
+            name="回撤",
+            line={"color": "#dc2626", "width": 1.6},
+            fillcolor="rgba(220, 38, 38, 0.16)",
+            hovertemplate="日期=%{x|%Y-%m-%d}<br>回撤=%{y:.2%}<extra></extra>",
+        ),
+        row=2,
+        col=1,
+    )
+    return_df = df.dropna(subset=["日涨跌幅"]).copy()
+    colors = return_df["日涨跌幅"].map(lambda value: "#dc2626" if value < 0 else "#16a34a")
+    fig.add_trace(
+        go.Bar(
+            x=return_df["日期"],
+            y=return_df["日涨跌幅"],
+            marker_color=colors,
+            name="日涨跌幅",
+            hovertemplate="日期=%{x|%Y-%m-%d}<br>日涨跌幅=%{y:.2%}<extra></extra>",
+        ),
+        row=3,
+        col=1,
+    )
+    fig.update_layout(
+        template="plotly_white",
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
+        font={"color": "#111827"},
+        height=720,
+        margin={"l": 10, "r": 10, "t": 45, "b": 10},
+        hovermode="x unified",
+        showlegend=False,
+    )
+    fig.update_xaxes(showgrid=True, gridcolor="#eef2f7")
+    fig.update_yaxes(showgrid=True, gridcolor="#eef2f7", title_text="净值", row=1, col=1)
+    fig.update_yaxes(showgrid=True, gridcolor="#eef2f7", tickformat=".0%", title_text="回撤", row=2, col=1)
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor="#eef2f7",
+        zeroline=True,
+        zerolinecolor="#94a3b8",
+        tickformat=".1%",
+        title_text="涨跌幅",
+        row=3,
+        col=1,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def label_correlation(corr: pd.DataFrame, labels: dict[str, str]) -> pd.DataFrame:
+    if corr.empty:
+        return corr
+    return corr.rename(index=labels, columns=labels)
+
+
 st.sidebar.title("FundPilot")
 st.sidebar.caption("本地基金投研助手")
 page = st.sidebar.radio(
     "导航",
-    ["首页概览", "自选基金", "基金详情", "评分排行", "AI 简报", "系统任务"],
+    ["首页概览", "市场概览", "自选基金", "我的持仓", "基金详情", "评分排行", "相关性分析", "AI 简报", "系统任务"],
 )
 
 st.title("FundPilot 本地基金投研助手")
@@ -355,6 +531,8 @@ if page == "首页概览":
         scores = score_service.top_scores(db, limit=5)
         alerts = alert_service.unread_alerts(db)
         report = latest_report(db)
+        market_context = market_service.latest_market_context(db)
+    labels = {item.fund_code: f"{item.fund_code} {item.fund_name}" if item.fund_name else item.fund_code for item in watchlist}
 
     best_score = scores[0].total_score if scores and scores[0].total_score is not None else None
     best_rating = scores[0].rating if scores else "暂无"
@@ -369,7 +547,8 @@ if page == "首页概览":
     left, right = st.columns([1.35, 1])
     with left:
         section("推荐关注 Top 5", "按最新评分排序，优先查看高分且理由清晰的基金。")
-        st.dataframe(score_rows(scores), use_container_width=True, hide_index=True)
+        rating_guide()
+        st.dataframe(label_score_rows(score_rows(scores), labels), use_container_width=True, hide_index=True)
 
     with right:
         section("风险提醒", "来自大跌、回撤、评分下降和持仓集中度规则。")
@@ -383,19 +562,46 @@ if page == "首页概览":
         section("每日简报摘要")
         st.markdown(report.content)
 
+    section("市场概览")
+    market_cols = st.columns(4)
+    for idx, item in enumerate(market_context[:4]):
+        with market_cols[idx % 4]:
+            metric_card(item["index_name"], item.get("daily_return"), kind="return")
+
+elif page == "市场概览":
+    section("市场概览", "主要指数表现会进入每日简报，作为自选基金变化的背景信息。")
+    if st.button("同步市场数据", use_container_width=True):
+        with st.spinner("正在同步主要指数数据..."):
+            with db_session() as db:
+                st.json(market_service.sync_market_context(db))
+    with db_session() as db:
+        market_context = market_service.latest_market_context(db)
+    cols = st.columns(4)
+    for idx, item in enumerate(market_context[:4]):
+        with cols[idx % 4]:
+            metric_card(item["index_name"], item.get("daily_return"), kind="return")
+            st.caption(f"近1月：{pct(item.get('return_1m'))} · {item.get('trade_date') or '暂无日期'}")
+    st.dataframe(market_rows(market_context), use_container_width=True, hide_index=True)
+
 elif page == "自选基金":
     section("自选基金管理", "添加基金后，可以批量同步净值并进入详情页分析。")
     with st.form("add_watchlist", clear_on_submit=True):
         col1, col2, col3 = st.columns([1, 2, 1])
         fund_code = col1.text_input("基金代码", placeholder="000001")
         fund_name = col2.text_input("基金名称", placeholder="可留空，系统会尝试自动获取")
+        industry = col3.text_input("行业/主题", placeholder="例如：医药、宽基")
         note = st.text_input("备注", placeholder="例如：长期观察")
-        submitted = col3.form_submit_button("添加自选", use_container_width=True)
+        submitted = st.form_submit_button("添加自选", use_container_width=True)
     if submitted and fund_code:
-        with db_session() as db:
-            item = watchlist_service.add_watchlist_item(
-                db, fund_code, note=note or None, fund_name=fund_name or None
-            )
+        with st.spinner("正在添加自选基金并识别行业/主题..."):
+            with db_session() as db:
+                item = watchlist_service.add_watchlist_item(
+                    db,
+                    fund_code,
+                    note=note or None,
+                    fund_name=fund_name or None,
+                    industry=industry or None,
+                )
         st.success(f"已添加 {item.fund_code} {item.fund_name or ''}".strip())
 
     with db_session() as db:
@@ -407,9 +613,10 @@ elif page == "自选基金":
                 {
                     "基金代码": item.fund_code,
                     "基金名称": item.fund_name,
+                    "行业/主题": item.industry,
                     "分组": item.group_name,
                     "备注": item.note,
-                    "状态": "active" if item.is_active else "inactive",
+                    "状态": status_label(item.is_active),
                 }
                 for item in items
             ],
@@ -423,17 +630,77 @@ elif page == "自选基金":
     col1, col2 = st.columns(2)
     sync_code = col1.text_input("同步单只基金净值", placeholder="000001")
     if col1.button("同步单只", use_container_width=True) and sync_code:
-        with db_session() as db:
-            count = nav_service.sync_fund_nav(db, sync_code)
+        with st.spinner(f"正在同步 {sync_code.zfill(6)} 的净值数据..."):
+            with db_session() as db:
+                count = nav_service.sync_fund_nav(db, sync_code)
         st.success(f"已同步 {sync_code.zfill(6)}，共 {count} 条净值")
     if col2.button("同步全部自选基金", use_container_width=True):
-        with db_session() as db:
-            result = nav_service.sync_watchlist_nav(db)
+        with st.spinner("正在批量同步自选基金净值..."):
+            with db_session() as db:
+                result = nav_service.sync_watchlist_nav(db)
         if result:
             st.success("批量同步完成")
             st.json(result)
         else:
             st.info("没有 active 自选基金。")
+
+elif page == "我的持仓":
+    section("我的持仓", "维护持仓后，系统会计算组合市值、盈亏和持仓集中度。")
+    with st.form("add_position", clear_on_submit=True):
+        c1, c2, c3, c4 = st.columns(4)
+        fund_code = c1.text_input("基金代码", placeholder="000001")
+        holding_share = c2.number_input("持有份额", min_value=0.0, step=100.0)
+        cost_nav = c3.number_input("成本净值", min_value=0.0, step=0.01)
+        holding_amount = c4.number_input("投入金额", min_value=0.0, step=100.0)
+        note = st.text_input("备注")
+        submitted = st.form_submit_button("添加持仓", use_container_width=True)
+    if submitted and fund_code:
+        with db_session() as db:
+            portfolio_service.create_position(
+                db,
+                {
+                    "fund_code": fund_code,
+                    "holding_share": Decimal(str(holding_share)) if holding_share else None,
+                    "cost_nav": Decimal(str(cost_nav)) if cost_nav else None,
+                    "holding_amount": Decimal(str(holding_amount)) if holding_amount else None,
+                    "note": note or None,
+                },
+            )
+        st.success("持仓已添加")
+
+    with db_session() as db:
+        overview = portfolio_service.portfolio_overview(db)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("当前市值", money(overview["total_value"]))
+    c2.metric("投入成本", money(overview["total_cost"]))
+    c3.metric("收益金额", money(overview["profit_amount"]))
+    c4.metric("收益率", pct(overview["profit_rate"]))
+
+    rows = []
+    total_value = overview["total_value"] or Decimal("0")
+    for summary in overview["positions"]:
+        position = summary["position"]
+        current_value = summary["current_value"]
+        rows.append(
+            {
+                "ID": position.id,
+                "基金代码": position.fund_code,
+                "持有份额": float(position.holding_share) if position.holding_share else None,
+                "最新净值": float(summary["latest_nav"]) if summary["latest_nav"] else None,
+                "当前市值": float(current_value) if current_value else None,
+                "收益金额": float(summary["profit_amount"]) if summary["profit_amount"] else None,
+                "收益率": float(summary["profit_rate"]) if summary["profit_rate"] else None,
+                "权重": float(current_value / total_value) if current_value and total_value else None,
+                "备注": position.note,
+            }
+        )
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    chart_df = pd.DataFrame([row for row in rows if row.get("当前市值")])
+    if not chart_df.empty:
+        fig = px.pie(chart_df, names="基金代码", values="当前市值", hole=0.45)
+        fig.update_layout(template="plotly_white", height=360, margin={"l": 10, "r": 10, "t": 20, "b": 10})
+        st.plotly_chart(fig, use_container_width=True)
 
 elif page == "基金详情":
     codes = load_watchlist_codes()
@@ -448,37 +715,41 @@ elif page == "基金详情":
         action_cols = st.columns(4)
         if action_cols[0].button("同步净值", use_container_width=True):
             try:
-                with db_session() as db:
-                    count = nav_service.sync_fund_nav(db, fund_code)
+                with st.spinner("正在同步净值数据..."):
+                    with db_session() as db:
+                        count = nav_service.sync_fund_nav(db, fund_code)
                 st.success(f"已同步 {count} 条净值")
             except Exception as exc:
                 st.error(f"同步失败：{exc}")
 
         if action_cols[1].button("计算指标", use_container_width=True):
             try:
-                with db_session() as db:
-                    indicator = indicator_service.calculate_and_save_indicators(db, fund_code)
-                    calc_date = indicator.calc_date
+                with st.spinner("正在计算收益、回撤和波动指标..."):
+                    with db_session() as db:
+                        indicator = indicator_service.calculate_and_save_indicators(db, fund_code)
+                        calc_date = indicator.calc_date
                 st.success(f"指标已更新到 {calc_date}")
             except Exception as exc:
                 st.error(f"计算指标失败：{exc}")
 
         if action_cols[2].button("计算评分", use_container_width=True):
             try:
-                with db_session() as db:
-                    score = score_service.calculate_and_save_score(db, fund_code)
-                    total_score = score.total_score
+                with st.spinner("正在计算评分..."):
+                    with db_session() as db:
+                        score = score_service.calculate_and_save_score(db, fund_code)
+                        total_score = score.total_score
                 st.success(f"评分已更新：{total_score}")
             except Exception as exc:
                 st.error(f"计算评分失败：{exc}")
 
         if action_cols[3].button("一键同步并分析", use_container_width=True):
             try:
-                with db_session() as db:
-                    count = nav_service.sync_fund_nav(db, fund_code)
-                    indicator, score = analyze_fund(db, fund_code)
-                    calc_date = indicator.calc_date
-                    total_score = score.total_score
+                with st.spinner("正在同步净值、计算指标并生成评分..."):
+                    with db_session() as db:
+                        count = nav_service.sync_fund_nav(db, fund_code)
+                        indicator, score = analyze_fund(db, fund_code)
+                        calc_date = indicator.calc_date
+                        total_score = score.total_score
                 st.success(f"已同步 {count} 条净值，指标日期 {calc_date}，评分 {total_score}")
             except Exception as exc:
                 st.error(f"一键分析失败：{exc}")
@@ -524,15 +795,8 @@ elif page == "基金详情":
                 f"共 {len(filtered_df)} 条净值记录"
             )
 
-            section("净值走势与日涨跌幅")
-            chart_left, chart_right = st.columns([1.35, 1])
-            with chart_left:
-                render_nav_chart(filtered_df)
-            with chart_right:
-                render_daily_return_chart(filtered_df)
-
-            section("回撤曲线")
-            render_drawdown_chart(filtered_df)
+            section("净值、回撤与日涨跌幅", "三张图共用同一条时间轴，便于观察净值创新高、回撤扩大和日涨跌之间的关系。")
+            render_aligned_fund_charts(filtered_df)
 
         section("指标明细")
         st.dataframe(
@@ -555,7 +819,8 @@ elif page == "基金详情":
 elif page == "评分排行":
     with db_session() as db:
         scores = score_service.top_scores(db, limit=100)
-    rows = score_rows(scores)
+    labels = watchlist_name_map()
+    rows = label_score_rows(score_rows(scores), labels)
     ratings = sorted({row["评级"] for row in rows if row["评级"]})
 
     col1, col2 = st.columns([1, 1])
@@ -570,20 +835,157 @@ elif page == "评分排行":
     ]
 
     section("评分排行", "按规则评分模型排序，结合推荐理由做进一步观察。")
+    rating_guide()
     st.dataframe(filtered, use_container_width=True, hide_index=True)
 
     if filtered:
-        chart_df = pd.DataFrame(filtered[:20]).dropna(subset=["总分"])
-        fig = px.bar(chart_df, x="基金代码", y="总分", color="评级", text="总分")
+        chart_df = pd.DataFrame(filtered[:20]).dropna(subset=["总分"]).sort_values("总分")
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=chart_df["总分"],
+                y=chart_df["基金"],
+                orientation="h",
+                text=chart_df["总分"].map(lambda value: f"{value:.1f}"),
+                textposition="outside",
+                marker={
+                    "color": chart_df["总分"],
+                    "colorscale": "Viridis",
+                    "showscale": True,
+                    "colorbar": {"title": "总分"},
+                },
+                hovertemplate="基金=%{y}<br>总分=%{x:.2f}<extra></extra>",
+            )
+        )
         fig.update_layout(
             template="plotly_white",
             paper_bgcolor="#ffffff",
             plot_bgcolor="#ffffff",
             font={"color": "#111827"},
-            height=360,
-            margin={"l": 10, "r": 10, "t": 20, "b": 10},
+            height=max(360, 26 * len(chart_df) + 120),
+            margin={"l": 10, "r": 58, "t": 20, "b": 10},
+            xaxis_title="总分",
+            yaxis_title=None,
         )
+        fig.update_xaxes(range=[0, 105], showgrid=True, gridcolor="#eef2f7")
+        fig.update_yaxes(showgrid=False)
         st.plotly_chart(fig, use_container_width=True)
+
+elif page == "相关性分析":
+    section("相关性分析", "基于自选基金日收益率计算，用于发现重复配置。")
+    labels = watchlist_name_map()
+    with db_session() as db:
+        corr = correlation_service.calculate_correlation(db)
+        pairs = correlation_service.high_correlation_pairs(db)
+    if corr.empty:
+        st.info("相关性数据不足。至少需要两只自选基金，并同步足够的日涨跌幅数据。")
+    else:
+        columns = list(corr.columns)
+        options = [labels.get(code, code) for code in columns]
+        option_to_code = {labels.get(code, code): code for code in columns}
+
+        pair_rows = [
+            {
+                "基金A": labels.get(pair["fund_a"], pair["fund_a"]),
+                "基金B": labels.get(pair["fund_b"], pair["fund_b"]),
+                "相关系数": round(pair["correlation"], 3),
+                "解读": "高度相似，可能重复配置" if pair["correlation"] >= 0.85 else "可观察",
+            }
+            for pair in pairs
+        ]
+        if pair_rows:
+            section("高相关组合", "优先看这里：相关系数越接近 1，走势越相似。")
+            st.dataframe(pair_rows, use_container_width=True, hide_index=True)
+        else:
+            st.success("当前未发现相关系数超过 0.85 的基金组合。")
+
+        section("基金对比", "选择两只基金查看相关系数和日涨跌走势，相关系数越接近 1，短期波动越相似。")
+        col_a, col_b = st.columns(2)
+        selected_a = col_a.selectbox("基金 A", options=options, index=0)
+        selected_b = col_b.selectbox("基金 B", options=options, index=1 if len(options) > 1 else 0)
+        code_a = option_to_code[selected_a]
+        code_b = option_to_code[selected_b]
+
+        if code_a == code_b:
+            st.info("请选择两只不同的基金进行对比。")
+        else:
+            correlation_value = corr.loc[code_a, code_b]
+            interpretation = (
+                "高度相似，可能存在重复配置"
+                if correlation_value >= 0.85
+                else "走势有一定相似性"
+                if correlation_value >= 0.5
+                else "相关性较低，走势差异较明显"
+            )
+            c1, c2, c3 = st.columns(3)
+            c1.metric("相关系数", f"{correlation_value:.3f}")
+            c2.metric("解读", interpretation)
+
+            with db_session() as db:
+                matrix = correlation_service.fund_return_matrix(db)
+            pair_matrix = matrix[[code_a, code_b]].dropna() if not matrix.empty else pd.DataFrame()
+            c3.metric("共同交易日", len(pair_matrix))
+
+            if pair_matrix.empty:
+                st.info("这两只基金没有足够的重合日涨跌数据。")
+            else:
+                pair_plot = pair_matrix.tail(180).rename(columns={code_a: selected_a, code_b: selected_b}).reset_index()
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=pair_plot["nav_date"],
+                        y=pair_plot[selected_a],
+                        mode="lines",
+                        name=selected_a,
+                        line={"color": "#2563eb", "width": 1.8},
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=pair_plot["nav_date"],
+                        y=pair_plot[selected_b],
+                        mode="lines",
+                        name=selected_b,
+                        line={"color": "#f97316", "width": 1.8},
+                    )
+                )
+                fig.update_layout(
+                    template="plotly_white",
+                    paper_bgcolor="#ffffff",
+                    plot_bgcolor="#ffffff",
+                    font={"color": "#111827"},
+                    height=380,
+                    margin={"l": 10, "r": 10, "t": 20, "b": 10},
+                    hovermode="x unified",
+                    xaxis_title=None,
+                    yaxis_title="日涨跌幅",
+                    yaxis_tickformat=".1%",
+                )
+                fig.update_xaxes(showgrid=True, gridcolor="#eef2f7")
+                fig.update_yaxes(showgrid=True, gridcolor="#eef2f7", zeroline=True, zerolinecolor="#94a3b8")
+                st.plotly_chart(fig, use_container_width=True)
+
+            related_rows = []
+            for other_code in columns:
+                if other_code == code_a:
+                    continue
+                value = corr.loc[code_a, other_code]
+                if pd.notna(value):
+                    related_rows.append(
+                        {
+                            "对比基金": labels.get(other_code, other_code),
+                            "相关系数": round(float(value), 3),
+                            "解读": "高度相似" if value >= 0.85 else "中等相关" if value >= 0.5 else "低相关",
+                        }
+                    )
+            related_rows = sorted(related_rows, key=lambda item: item["相关系数"], reverse=True)
+            section("基金 A 的相似度排行", "用于快速找到与当前基金走势最接近的自选基金。")
+            st.dataframe(related_rows[:10], use_container_width=True, hide_index=True)
+
+        if st.button("生成高相关预警", use_container_width=True):
+            with db_session() as db:
+                alerts = correlation_service.generate_correlation_alerts(db)
+            st.success(f"已生成或更新 {len(alerts)} 条相关性预警")
 
 elif page == "AI 简报":
     section("每日基金简报", "基于自选基金、评分和预警生成；Ollama 不可用时使用规则兜底。")
@@ -619,16 +1021,41 @@ elif page == "AI 简报":
 
 elif page == "系统任务":
     section("手动批处理", "按数据链路顺序执行：同步净值、计算指标、计算评分、生成预警。")
-    c1, c2, c3, c4 = st.columns(4)
-    if c1.button("同步自选净值", use_container_width=True):
-        with db_session() as db:
-            st.json(nav_service.sync_watchlist_nav(db))
-    if c2.button("计算全部指标", use_container_width=True):
-        with db_session() as db:
-            st.json(indicator_service.calculate_watchlist_indicators(db))
-    if c3.button("计算全部评分", use_container_width=True):
-        with db_session() as db:
-            st.json(score_service.calculate_watchlist_scores(db))
-    if c4.button("生成风险预警", use_container_width=True):
-        with db_session() as db:
-            st.write([alert.title for alert in alert_service.generate_alerts(db)])
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown('<div class="task-button-note">拉取所有启用自选基金的历史净值。</div>', unsafe_allow_html=True)
+        sync_nav_clicked = st.button("同步自选净值", use_container_width=True, type="primary")
+    with c2:
+        st.markdown('<div class="task-button-note">基于净值计算收益、回撤、波动和胜率。</div>', unsafe_allow_html=True)
+        calc_indicator_clicked = st.button("计算全部指标", use_container_width=True, type="primary")
+
+    c3, c4 = st.columns(2)
+    with c3:
+        st.markdown('<div class="task-button-note">基于最新指标生成评分、评级和理由。</div>', unsafe_allow_html=True)
+        calc_score_clicked = st.button("计算全部评分", use_container_width=True, type="primary")
+    with c4:
+        st.markdown('<div class="task-button-note">生成大跌、回撤、持仓集中度等预警。</div>', unsafe_allow_html=True)
+        alert_clicked = st.button("生成风险预警", use_container_width=True, type="primary")
+
+    market_clicked = st.button("同步市场数据", use_container_width=True)
+
+    if sync_nav_clicked:
+        with st.spinner("正在同步自选基金净值..."):
+            with db_session() as db:
+                st.json(nav_service.sync_watchlist_nav(db))
+    if calc_indicator_clicked:
+        with st.spinner("正在计算全部指标..."):
+            with db_session() as db:
+                st.json(indicator_service.calculate_watchlist_indicators(db))
+    if calc_score_clicked:
+        with st.spinner("正在计算全部评分..."):
+            with db_session() as db:
+                st.json(score_service.calculate_watchlist_scores(db))
+    if alert_clicked:
+        with st.spinner("正在生成风险预警..."):
+            with db_session() as db:
+                st.write([alert.title for alert in alert_service.generate_alerts(db)])
+    if market_clicked:
+        with st.spinner("正在同步市场数据..."):
+            with db_session() as db:
+                st.json(market_service.sync_market_context(db))

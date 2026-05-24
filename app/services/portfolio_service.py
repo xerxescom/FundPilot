@@ -64,3 +64,23 @@ def position_summary(db: Session, position: PortfolioPosition) -> dict:
         "profit_amount": profit,
         "profit_rate": profit / cost if profit is not None and cost else None,
     }
+
+
+def portfolio_overview(db: Session) -> dict:
+    summaries = [position_summary(db, item) for item in list_positions(db)]
+    total_value = sum((item["current_value"] or Decimal("0")) for item in summaries)
+    total_cost = Decimal("0")
+    for summary in summaries:
+        position = summary["position"]
+        if position.holding_amount is not None:
+            total_cost += Decimal(position.holding_amount)
+        elif position.holding_share is not None and position.cost_nav is not None:
+            total_cost += Decimal(position.holding_share) * Decimal(position.cost_nav)
+    profit_amount = total_value - total_cost if total_cost else None
+    return {
+        "total_value": total_value,
+        "total_cost": total_cost if total_cost else None,
+        "profit_amount": profit_amount,
+        "profit_rate": profit_amount / total_cost if profit_amount is not None and total_cost else None,
+        "positions": summaries,
+    }

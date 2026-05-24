@@ -75,6 +75,33 @@ class AkshareFundDataSource(FundDataSource):
             logger.warning("Failed to fetch fund rank list: {}", exc)
             return pd.DataFrame()
 
+    def get_market_index_history(self, index_code: str) -> pd.DataFrame:
+        try:
+            import akshare as ak
+
+            raw = ak.stock_zh_index_daily(symbol=index_code)
+        except Exception as exc:
+            logger.error("Failed to fetch market index history for {}: {}", index_code, exc)
+            raise ValueError(f"Failed to fetch market index history for {index_code}") from exc
+
+        if raw is None or raw.empty:
+            raise ValueError(f"No market index history returned for {index_code}")
+
+        date_col = self._pick_column(raw, ["date", "日期"])
+        close_col = self._pick_column(raw, ["close", "收盘"])
+        df = pd.DataFrame(
+            {
+                "index_code": index_code,
+                "trade_date": pd.to_datetime(raw[date_col], errors="coerce").dt.date,
+                "close": pd.to_numeric(raw[close_col], errors="coerce"),
+                "source": self.source_name,
+            }
+        )
+        df = df.dropna(subset=["trade_date", "close"]).drop_duplicates(["index_code", "trade_date"])
+        df = df.sort_values("trade_date").reset_index(drop=True)
+        df["daily_return"] = df["close"].pct_change()
+        return df
+
     @staticmethod
     def _pick_column(df: pd.DataFrame, candidates: list[str]) -> str:
         col = AkshareFundDataSource._pick_optional_column(df, candidates)

@@ -175,8 +175,15 @@ def calculate_watchlist_scores(db: Session) -> dict[str, str]:
 
 
 def top_scores(db: Session, limit: int = 20) -> list[FundScore]:
-    return list(
-        db.scalars(
-            select(FundScore).order_by(FundScore.score_date.desc(), FundScore.total_score.desc()).limit(limit)
-        )
+    scores = list(
+        db.scalars(select(FundScore).order_by(FundScore.score_date.desc(), FundScore.total_score.desc()))
     )
+    latest_by_code: dict[str, FundScore] = {}
+    for score in scores:
+        if score.fund_code not in latest_by_code:
+            latest_by_code[score.fund_code] = score
+    return sorted(
+        latest_by_code.values(),
+        key=lambda item: (item.total_score is not None, item.total_score or 0),
+        reverse=True,
+    )[:limit]
