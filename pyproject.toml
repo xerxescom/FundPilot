@@ -1,6 +1,6 @@
 [project]
 name = "fundpilot"
-version = "0.1.0"
+version = "1.0.0"
 description = "Local fund research assistant with FastAPI, PostgreSQL, Streamlit, and AI summaries."
 readme = "README.md"
 requires-python = ">=3.11"
