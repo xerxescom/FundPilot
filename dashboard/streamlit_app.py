@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 
 import pandas as pd
@@ -10,11 +11,13 @@ from app.db.session import SessionLocal, init_db
 from app.services import (
     alert_service,
     correlation_service,
+    data_health_service,
     indicator_service,
     market_service,
     nav_service,
     portfolio_service,
     score_service,
+    task_log_service,
     watchlist_service,
 )
 from app.services.ai.report_service import generate_daily_report, latest_report
@@ -200,6 +203,10 @@ def score_value(value: Decimal | float | int | None) -> str:
     return "-" if value is None else f"{float(value):.2f}"
 
 
+def date_value(value) -> str:
+    return "暂无" if value is None else str(value)
+
+
 def section(title: str, caption: str | None = None) -> None:
     st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
     if caption:
@@ -268,10 +275,18 @@ def load_watchlist_codes() -> list[str]:
         ]
 
 
-def watchlist_name_map() -> dict[str, str]:
+def watchlist_label_map() -> dict[str, str]:
     with db_session() as db:
         return {
             item.fund_code: f"{item.fund_code} {item.fund_name}" if item.fund_name else item.fund_code
+            for item in watchlist_service.list_watchlist_items(db)
+        }
+
+
+def watchlist_fund_name_map() -> dict[str, str]:
+    with db_session() as db:
+        return {
+            item.fund_code: item.fund_name or item.fund_code
             for item in watchlist_service.list_watchlist_items(db)
         }
 
@@ -305,8 +320,8 @@ def score_rows(scores) -> list[dict]:
     ]
 
 
-def label_score_rows(rows: list[dict], labels: dict[str, str]) -> list[dict]:
-    return [{**row, "基金": labels.get(row["基金代码"], row["基金代码"])} for row in rows]
+def label_score_rows(rows: list[dict], labels: dict[str, str], column_name: str = "基金") -> list[dict]:
+    return [{**row, column_name: labels.get(row["基金代码"], row["基金代码"])} for row in rows]
 
 
 def money(value: Decimal | float | int | None) -> str:
@@ -325,6 +340,36 @@ def market_rows(market_context: list[dict]) -> list[dict]:
         }
         for item in market_context
     ]
+
+
+def task_log_rows(logs) -> list[dict]:
+    return [
+        {
+            "时间": log.created_at,
+            "任务": log.task_name,
+            "状态": "成功" if log.status == "success" else "失败",
+            "耗时(ms)": log.duration_ms,
+            "成功数": log.success_count,
+            "失败数": log.failure_count,
+            "信息": log.message,
+        }
+        for log in logs
+    ]
+
+
+def render_report_metadata(report) -> None:
+    c1, c2, c3 = st.columns(3)
+    c1.metric("生成模型", report.model_name or "unknown")
+    c2.metric("生成时间", f"{report.created_at:%Y-%m-%d %H:%M}")
+    c3.metric("兜底状态", "规则兜底" if report.is_fallback else "模型生成")
+    if report.fallback_reason:
+        st.warning(f"兜底原因：{report.fallback_reason}")
+    if report.input_snapshot:
+        with st.expander("输入数据摘要"):
+            try:
+                st.json(json.loads(report.input_snapshot))
+            except json.JSONDecodeError:
+                st.code(report.input_snapshot)
 
 
 def nav_dataframe(nav_rows) -> pd.DataFrame:
@@ -532,7 +577,8 @@ if page == "首页概览":
         alerts = alert_service.unread_alerts(db)
         report = latest_report(db)
         market_context = market_service.latest_market_context(db)
-    labels = {item.fund_code: f"{item.fund_code} {item.fund_name}" if item.fund_name else item.fund_code for item in watchlist}
+        health = data_health_service.data_health_overview(db)
+    fund_names = {item.fund_code: item.fund_name or item.fund_code for item in watchlist}
 
     best_score = scores[0].total_score if scores and scores[0].total_score is not None else None
     best_rating = scores[0].rating if scores else "暂无"
@@ -544,11 +590,38 @@ if page == "首页概览":
     c3.metric("未读预警", len(alerts))
     c4.metric("最近简报", latest_report_time)
 
+    section("数据状态", "检查自选基金净值是否过旧、断档，以及指标是否需要重新计算。")
+    h1, h2, h3, h4 = st.columns(4)
+    h1.metric("最新净值日期", date_value(health["latest_nav_date"]))
+    h2.metric("需关注基金", health["stale_fund_count"])
+    h3.metric("待计算指标", health["pending_indicator_count"])
+    h4.metric("净值断档", health["gap_count"])
+    problem_rows = [item for item in health["funds"] if item["issues"]]
+    if problem_rows:
+        st.dataframe(
+            [
+                {
+                    "基金代码": item["fund_code"],
+                    "状态": item["status"],
+                    "最新净值": item["latest_nav_date"],
+                    "净值条数": item["nav_count"],
+                    "问题": "；".join(item["issues"]),
+                }
+                for item in problem_rows[:8]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
     left, right = st.columns([1.35, 1])
     with left:
         section("推荐关注 Top 5", "按最新评分排序，优先查看高分且理由清晰的基金。")
         rating_guide()
-        st.dataframe(label_score_rows(score_rows(scores), labels), use_container_width=True, hide_index=True)
+        st.dataframe(
+            label_score_rows(score_rows(scores), fund_names, column_name="基金名称"),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     with right:
         section("风险提醒", "来自大跌、回撤、评分下降和持仓集中度规则。")
@@ -627,14 +700,13 @@ elif page == "自选基金":
         st.info("还没有自选基金。先添加一只基金代码开始。")
 
     section("同步操作")
-    col1, col2 = st.columns(2)
-    sync_code = col1.text_input("同步单只基金净值", placeholder="000001")
-    if col1.button("同步单只", use_container_width=True) and sync_code:
+    sync_code = st.text_input("同步单只基金净值", placeholder="000001")
+    if st.button("同步单只", use_container_width=True) and sync_code:
         with st.spinner(f"正在同步 {sync_code.zfill(6)} 的净值数据..."):
             with db_session() as db:
                 count = nav_service.sync_fund_nav(db, sync_code)
         st.success(f"已同步 {sync_code.zfill(6)}，共 {count} 条净值")
-    if col2.button("同步全部自选基金", use_container_width=True):
+    if st.button("同步全部自选基金", use_container_width=True):
         with st.spinner("正在批量同步自选基金净值..."):
             with db_session() as db:
                 result = nav_service.sync_watchlist_nav(db)
@@ -676,6 +748,9 @@ elif page == "我的持仓":
     c2.metric("投入成本", money(overview["total_cost"]))
     c3.metric("收益金额", money(overview["profit_amount"]))
     c4.metric("收益率", pct(overview["profit_rate"]))
+    c5, c6 = st.columns(2)
+    c5.metric("最高单基占比", pct(overview.get("max_weight")))
+    c6.metric("组合近1月回撤", pct(overview.get("drawdown_1m")))
 
     rows = []
     total_value = overview["total_value"] or Decimal("0")
@@ -696,6 +771,60 @@ elif page == "我的持仓":
             }
         )
     st.dataframe(rows, use_container_width=True, hide_index=True)
+    if rows:
+        section("编辑持仓", "选择一条持仓后可修改份额、成本和备注，或删除不再跟踪的记录。")
+        position_options = [f"{row['ID']} - {row['基金代码']}" for row in rows]
+        selected_position = st.selectbox("选择持仓", position_options)
+        selected_id = int(selected_position.split(" - ", 1)[0])
+        selected_row = next(row for row in rows if row["ID"] == selected_id)
+        with st.form("edit_position"):
+            e1, e2, e3 = st.columns(3)
+            holding_share = e1.number_input(
+                "持有份额",
+                min_value=0.0,
+                step=100.0,
+                value=float(selected_row["持有份额"] or 0),
+            )
+            cost_nav = e2.number_input(
+                "成本净值",
+                min_value=0.0,
+                step=0.01,
+                value=float(next(item for item in overview["positions"] if item["position"].id == selected_id)["position"].cost_nav or 0),
+            )
+            holding_amount = e3.number_input(
+                "投入金额",
+                min_value=0.0,
+                step=100.0,
+                value=float(
+                    next(item for item in overview["positions"] if item["position"].id == selected_id)[
+                        "position"
+                    ].holding_amount
+                    or 0
+                ),
+            )
+            note = st.text_input("备注", value=selected_row.get("备注") or "")
+            save_position = st.form_submit_button("保存修改", use_container_width=True)
+        d1, d2 = st.columns([1, 3])
+        delete_position = d1.button("删除持仓", use_container_width=True)
+        if save_position:
+            with db_session() as db:
+                portfolio_service.update_position(
+                    db,
+                    selected_id,
+                    {
+                        "holding_share": Decimal(str(holding_share)) if holding_share else None,
+                        "cost_nav": Decimal(str(cost_nav)) if cost_nav else None,
+                        "holding_amount": Decimal(str(holding_amount)) if holding_amount else None,
+                        "note": note or None,
+                    },
+                )
+            st.success("持仓已更新")
+            st.rerun()
+        if delete_position:
+            with db_session() as db:
+                portfolio_service.delete_position(db, selected_id)
+            st.success("持仓已删除")
+            st.rerun()
     chart_df = pd.DataFrame([row for row in rows if row.get("当前市值")])
     if not chart_df.empty:
         fig = px.pie(chart_df, names="基金代码", values="当前市值", hole=0.45)
@@ -819,7 +948,7 @@ elif page == "基金详情":
 elif page == "评分排行":
     with db_session() as db:
         scores = score_service.top_scores(db, limit=100)
-    labels = watchlist_name_map()
+    labels = watchlist_label_map()
     rows = label_score_rows(score_rows(scores), labels)
     ratings = sorted({row["评级"] for row in rows if row["评级"]})
 
@@ -873,7 +1002,7 @@ elif page == "评分排行":
 
 elif page == "相关性分析":
     section("相关性分析", "基于自选基金日收益率计算，用于发现重复配置。")
-    labels = watchlist_name_map()
+    labels = watchlist_label_map()
     with db_session() as db:
         corr = correlation_service.calculate_correlation(db)
         pairs = correlation_service.high_correlation_pairs(db)
@@ -994,7 +1123,7 @@ elif page == "AI 简报":
         with db_session() as db:
             report = generate_daily_report(db)
         st.success("已生成")
-        st.caption(f"生成方式：{report.model_name or 'unknown'}")
+        render_report_metadata(report)
         st.markdown(report.content)
     elif col2.button("测试 Ollama 连接", use_container_width=True):
         try:
@@ -1013,8 +1142,7 @@ elif page == "AI 简报":
         with db_session() as db:
             report = latest_report(db)
         if report:
-            st.caption(f"生成时间：{report.created_at:%Y-%m-%d %H:%M}")
-            st.caption(f"生成方式：{report.model_name or 'unknown'}")
+            render_report_metadata(report)
             st.markdown(report.content)
         else:
             st.info("暂无简报。")
@@ -1042,20 +1170,52 @@ elif page == "系统任务":
     if sync_nav_clicked:
         with st.spinner("正在同步自选基金净值..."):
             with db_session() as db:
-                st.json(nav_service.sync_watchlist_nav(db))
+                st.json(task_log_service.run_logged(db, "manual_sync_watchlist_nav", lambda: nav_service.sync_watchlist_nav(db)))
     if calc_indicator_clicked:
         with st.spinner("正在计算全部指标..."):
             with db_session() as db:
-                st.json(indicator_service.calculate_watchlist_indicators(db))
+                st.json(
+                    task_log_service.run_logged(
+                        db,
+                        "manual_calc_indicators",
+                        lambda: indicator_service.calculate_watchlist_indicators(db),
+                    )
+                )
     if calc_score_clicked:
         with st.spinner("正在计算全部评分..."):
             with db_session() as db:
-                st.json(score_service.calculate_watchlist_scores(db))
+                st.json(
+                    task_log_service.run_logged(
+                        db,
+                        "manual_calc_scores",
+                        lambda: score_service.calculate_watchlist_scores(db),
+                    )
+                )
     if alert_clicked:
         with st.spinner("正在生成风险预警..."):
             with db_session() as db:
-                st.write([alert.title for alert in alert_service.generate_alerts(db)])
+                st.write(
+                    task_log_service.run_logged(
+                        db,
+                        "manual_generate_alerts",
+                        lambda: [alert.title for alert in alert_service.generate_alerts(db)],
+                    )
+                )
     if market_clicked:
         with st.spinner("正在同步市场数据..."):
             with db_session() as db:
-                st.json(market_service.sync_market_context(db))
+                st.json(
+                    task_log_service.run_logged(
+                        db,
+                        "manual_sync_market_context",
+                        lambda: market_service.sync_market_context(db),
+                    )
+                )
+
+    section("最近任务日志", "展示手动任务和定时任务的执行结果、耗时和失败原因。")
+    with db_session() as db:
+        logs = task_log_service.latest_task_logs(db, limit=30)
+    if logs:
+        st.dataframe(task_log_rows(logs), use_container_width=True, hide_index=True)
+    else:
+        st.info("暂无任务日志。")

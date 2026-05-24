@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import AlertEvent, FundIndicator, FundNav, FundScore, PortfolioPosition
-from app.services.portfolio_service import position_summary
+from app.services.portfolio_service import portfolio_drawdown_1m, position_summary
 
 
 def _upsert_alert(
@@ -108,6 +108,18 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
                         f"当前估算占比为 {(value / total):.2%}",
                     )
                 )
+    drawdown_1m = portfolio_drawdown_1m(db)
+    if drawdown_1m is not None and drawdown_1m <= Decimal("-0.08"):
+        alerts.append(
+            _upsert_alert(
+                db,
+                "portfolio_drawdown",
+                None,
+                "medium",
+                "组合近 1 月回撤超过 8%",
+                f"当前估算近 1 月组合最大回撤为 {drawdown_1m:.2%}",
+            )
+        )
     return alerts
 
 

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import AIReport, AlertEvent, FundIndicator, FundInfo, FundScore, Watchlist
-from app.services import market_service, portfolio_service
+from app.services import correlation_service, market_service, portfolio_service, score_service
 from app.services.ai.ollama_client import OllamaClient
 from app.services.ai.prompt_templates import DAILY_REPORT_PROMPT, FUND_EXPLAIN_PROMPT
 
-FORBIDDEN_TERMS = ["立即买入", "立即卖出", "重仓买入", "保证收益"]
+FORBIDDEN_TERMS = ["立即买入", "立即卖出", "买入", "卖出", "重仓", "保证收益", "稳赚"]
 
 
 def _sanitize(content: str) -> str:
@@ -17,6 +19,14 @@ def _sanitize(content: str) -> str:
     for term in FORBIDDEN_TERMS:
         cleaned = cleaned.replace(term, "继续观察")
     return cleaned.strip()
+
+
+def _contains_forbidden(content: str) -> str | None:
+    return next((term for term in FORBIDDEN_TERMS if term in content), None)
+
+
+def _snapshot(data: dict) -> str:
+    return json.dumps(data, ensure_ascii=False, default=str)[:8000]
 
 
 def _fallback_report(data: dict) -> str:
@@ -34,7 +44,7 @@ def _fallback_report(data: dict) -> str:
         "组合表现\n"
         f"组合当前市值：{portfolio.get('total_value')}，"
         f"收益率：{portfolio.get('profit_rate')}。\n\n"
-        "重点关注\n"
+        "自选基金表现\n"
         f"当前自选基金数量：{data.get('watchlist_count', 0)}，"
         f"已有评分数量：{data.get('score_count', 0)}。\n\n"
         "风险提醒\n"
@@ -54,7 +64,7 @@ def _fallback_with_error(data: dict, error: Exception | str) -> str:
 
 def collect_daily_report_data(db: Session) -> dict:
     watchlist = db.scalars(select(Watchlist).where(Watchlist.is_active.is_(True))).all()
-    scores = db.scalars(select(FundScore).order_by(FundScore.total_score.desc()).limit(10)).all()
+    scores = score_service.top_scores(db, limit=10)
     alerts = db.scalars(select(AlertEvent).where(AlertEvent.is_read.is_(False))).all()
     fund_names = {
         item.fund_code: item.fund_name
@@ -70,6 +80,7 @@ def collect_daily_report_data(db: Session) -> dict:
     )
     portfolio = portfolio_service.portfolio_overview(db)
     market_context = market_service.latest_market_context(db)
+    high_correlation_pairs = correlation_service.high_correlation_pairs(db)
     return {
         "watchlist_count": len(watchlist),
         "score_count": len(scores),
@@ -101,6 +112,16 @@ def collect_daily_report_data(db: Session) -> dict:
             }
             for item in alerts[:10]
         ],
+        "high_correlation_pairs": [
+            {
+                "fund_a": item["fund_a"],
+                "fund_a_name": fund_names.get(item["fund_a"]),
+                "fund_b": item["fund_b"],
+                "fund_b_name": fund_names.get(item["fund_b"]),
+                "correlation": item["correlation"],
+            }
+            for item in high_correlation_pairs[:10]
+        ],
     }
 
 
@@ -108,19 +129,35 @@ def generate_daily_report(db: Session) -> AIReport:
     data = collect_daily_report_data(db)
     prompt = DAILY_REPORT_PROMPT.format(fund_data=data)
     model_name = get_settings().ollama_model
+    is_fallback = False
+    fallback_reason = None
     try:
         content = OllamaClient().generate(prompt)
         if not content:
-            content = _fallback_with_error(data, "Ollama 返回了空内容")
+            fallback_reason = "Ollama 返回了空内容"
+            content = _fallback_with_error(data, fallback_reason)
             model_name = "rule-fallback"
+            is_fallback = True
+        else:
+            forbidden = _contains_forbidden(content)
+            if forbidden:
+                fallback_reason = f"AI 输出包含受限表达：{forbidden}"
+                content = _fallback_with_error(data, fallback_reason)
+                model_name = "rule-fallback"
+                is_fallback = True
     except Exception as exc:
+        fallback_reason = str(exc)
         content = _fallback_with_error(data, exc)
         model_name = "rule-fallback"
+        is_fallback = True
     report = AIReport(
         report_type="daily",
         title="每日基金简报",
         content=_sanitize(content),
         model_name=model_name,
+        is_fallback=is_fallback,
+        fallback_reason=fallback_reason,
+        input_snapshot=_snapshot(data),
     )
     db.add(report)
     db.commit()
@@ -143,9 +180,23 @@ def generate_fund_explanation(db: Session, fund_code: str) -> AIReport:
     }
     prompt = FUND_EXPLAIN_PROMPT.format(fund_data=data)
     model_name = get_settings().ollama_model
+    is_fallback = False
+    fallback_reason = None
     try:
         content = OllamaClient().generate(prompt)
+        forbidden = _contains_forbidden(content)
+        if forbidden:
+            fallback_reason = f"AI 输出包含受限表达：{forbidden}"
+            content = (
+                "AI 调用失败，已使用规则兜底\n"
+                f"失败原因：{fallback_reason}\n\n"
+                f"{fund_code} 当前使用规则解释：请结合收益率、最大回撤、波动率和评分原因综合观察。"
+                "本说明不构成投资建议。"
+            )
+            model_name = "rule-fallback"
+            is_fallback = True
     except Exception as exc:
+        fallback_reason = str(exc)
         content = (
             "AI 调用失败，已使用规则兜底\n"
             f"失败原因：{exc}\n\n"
@@ -153,12 +204,16 @@ def generate_fund_explanation(db: Session, fund_code: str) -> AIReport:
             "本说明不构成投资建议。"
         )
         model_name = "rule-fallback"
+        is_fallback = True
     report = AIReport(
         report_type="fund",
         target_code=fund_code,
         title=f"{fund_code} 基金解释",
         content=_sanitize(content),
         model_name=model_name,
+        is_fallback=is_fallback,
+        fallback_reason=fallback_reason,
+        input_snapshot=_snapshot(data),
     )
     db.add(report)
     db.commit()
@@ -182,3 +237,7 @@ def latest_fund_report(db: Session, fund_code: str) -> AIReport | None:
         .order_by(AIReport.created_at.desc())
         .limit(1)
     )
+
+
+def latest_daily_context(db: Session) -> dict:
+    return collect_daily_report_data(db)

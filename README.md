@@ -19,7 +19,7 @@
 uv sync
 copy .env.example .env
 docker compose up -d postgres
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
 健康检查：
@@ -103,10 +103,11 @@ uv run python scripts/check_ollama.py
 如果模型存在但生成日报超时，可以调大 `.env` 里的 Ollama 超时时间，单位是秒：
 
 ```env
-OLLAMA_TIMEOUT=120
+OLLAMA_MODEL=qwen3:14b
+OLLAMA_TIMEOUT=180
 ```
 
-大模型首次加载会比较慢。如果还是超时，可以先执行 `ollama run gemma4:latest "你好"` 预热模型，或把 `OLLAMA_TIMEOUT` 调到 `180` / `300`。
+RTX 4070 本地优先推荐 `qwen3:14b`；如果更看重速度，可以改成 `qwen3:8b`。大模型首次加载会比较慢。如果还是超时，可以先执行 `ollama run qwen3:14b "你好"` 预热模型，或把 `OLLAMA_TIMEOUT` 调到 `240` / `300`。
 
 查看组合概况和基金相关性：
 
@@ -123,6 +124,35 @@ market indexes -> market_index_daily -> market context -> dashboard/report
 portfolio_position + latest nav -> portfolio overview -> alerts/report
 fund_nav daily_return -> correlation matrix -> high-correlation alerts
 ```
+
+## 配置项
+
+常用配置都在 `.env` 中：
+
+```env
+BACKEND_PORT=8000
+STREAMLIT_PORT=8501
+SYNC_NAV_CRON=18:00
+OLLAMA_MODEL=qwen3:14b
+OLLAMA_TIMEOUT=180
+```
+
+如果 `8000` 或 `8501` 被占用，可以改 `BACKEND_PORT` 或 `STREAMLIT_PORT`，Docker Compose 会按配置映射端口。
+
+## API 补充
+
+- `GET /api/v1/data/health`：查看自选基金净值健康状态、断档、缺失涨跌幅、待计算指标数量。
+- `GET /api/v1/tasks/logs`：查看最近任务执行日志、耗时和失败原因。
+- `GET /api/v1/reports/context/latest`：查看生成 AI 日报所使用的结构化输入摘要。
+- `PUT /api/v1/portfolio/{position_id}`：编辑持仓。
+- `DELETE /api/v1/portfolio/{position_id}`：删除持仓。
+
+## Streamlit 页面补充
+
+- 首页增加“数据状态”，用于发现净值过旧、断档和待计算指标。
+- 我的持仓支持新增、编辑和删除，并展示最高单基占比、组合近 1 月回撤。
+- AI 简报展示生成模型、生成时间、是否规则兜底、失败原因和输入数据摘要。
+- 系统任务展示最近任务日志，便于排查同步和计算失败。
 
 ## 数据库迁移
 
@@ -148,6 +178,12 @@ docker compose up --build
 - FastAPI: http://127.0.0.1:8000
 - API docs: http://127.0.0.1:8000/docs
 - Streamlit: http://127.0.0.1:8501
+
+如果修改了端口，请访问 `.env` 中对应的 `BACKEND_PORT` 和 `STREAMLIT_PORT`。
+
+## 作品集演示
+
+建议参考 [docs/demo_script.md](docs/demo_script.md) 进行 5 分钟演示，重点展示数据链路、规则评分、风险预警和 AI 兜底能力。
 
 ## 重要边界
 

@@ -21,6 +21,11 @@ def latest_report(db: Session = Depends(get_db)):
     return report
 
 
+@router.get("/context/latest")
+def latest_report_context(db: Session = Depends(get_db)):
+    return report_service.latest_daily_context(db)
+
+
 @router.post("/fund/{fund_code}", response_model=ReportOut)
 def generate_fund_report(fund_code: str, db: Session = Depends(get_db)):
     return report_service.generate_fund_explanation(db, fund_code)

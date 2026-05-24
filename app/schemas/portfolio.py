@@ -46,4 +46,6 @@ class PortfolioOverview(BaseModel):
     total_cost: Decimal | None
     profit_amount: Decimal | None
     profit_rate: Decimal | None
+    max_weight: Decimal | None = None
+    drawdown_1m: Decimal | None = None
     positions: list[PortfolioSummary]

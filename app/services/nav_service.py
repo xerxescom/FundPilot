@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.data_source.akshare_client import AkshareFundDataSource
+from app.data_source.eastmoney_client import EastmoneyFundDataSource
 from app.db.models import FundInfo, FundNav, Watchlist
 
 
@@ -62,7 +63,16 @@ def upsert_nav_rows(db: Session, rows: pd.DataFrame) -> int:
 def sync_fund_nav(db: Session, fund_code: str) -> int:
     fund_code = fund_code.zfill(6)
     ensure_fund_info(db, fund_code)
-    rows = AkshareFundDataSource().get_fund_nav_history(fund_code)
+    try:
+        rows = AkshareFundDataSource().get_fund_nav_history(fund_code)
+    except Exception as primary_exc:
+        try:
+            rows = EastmoneyFundDataSource().get_fund_nav_history(fund_code)
+        except Exception as fallback_exc:
+            raise ValueError(
+                f"Both data sources failed for {fund_code}; "
+                f"akshare: {primary_exc}; eastmoney: {fallback_exc}"
+            ) from fallback_exc
     return upsert_nav_rows(db, rows)
 
 

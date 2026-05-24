@@ -1,9 +1,10 @@
 from decimal import Decimal
 
+import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import PortfolioPosition
+from app.db.models import FundNav, PortfolioPosition
 from app.services.nav_service import latest_nav
 
 
@@ -77,10 +78,46 @@ def portfolio_overview(db: Session) -> dict:
         elif position.holding_share is not None and position.cost_nav is not None:
             total_cost += Decimal(position.holding_share) * Decimal(position.cost_nav)
     profit_amount = total_value - total_cost if total_cost else None
+    max_weight = None
+    if total_value:
+        weights = [(summary["current_value"] or Decimal("0")) / total_value for summary in summaries]
+        max_weight = max(weights) if weights else None
     return {
         "total_value": total_value,
         "total_cost": total_cost if total_cost else None,
         "profit_amount": profit_amount,
         "profit_rate": profit_amount / total_cost if profit_amount is not None and total_cost else None,
+        "max_weight": max_weight,
+        "drawdown_1m": portfolio_drawdown_1m(db),
         "positions": summaries,
     }
+
+
+def portfolio_drawdown_1m(db: Session) -> Decimal | None:
+    positions = [item for item in list_positions(db) if item.holding_share is not None]
+    if not positions:
+        return None
+    shares = {item.fund_code: Decimal(item.holding_share) for item in positions}
+    rows = db.scalars(
+        select(FundNav)
+        .where(FundNav.fund_code.in_(shares.keys()), FundNav.unit_nav.is_not(None))
+        .order_by(FundNav.nav_date.asc())
+    ).all()
+    if not rows:
+        return None
+    df = pd.DataFrame(
+        [
+            {
+                "nav_date": row.nav_date,
+                "fund_code": row.fund_code,
+                "value": float(Decimal(row.unit_nav) * shares[row.fund_code]),
+            }
+            for row in rows
+        ]
+    )
+    daily_value = df.pivot_table(index="nav_date", columns="fund_code", values="value").sum(axis=1)
+    one_month = daily_value.tail(30)
+    if len(one_month) < 2:
+        return None
+    drawdown = one_month / one_month.cummax() - 1
+    return Decimal(str(float(drawdown.min()))).quantize(Decimal("0.000001"))

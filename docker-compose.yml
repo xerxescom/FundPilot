@@ -13,21 +13,21 @@ services:
 
   backend:
     build: .
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port $${BACKEND_PORT:-8000}"
     depends_on:
       - postgres
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:${BACKEND_PORT:-8000}"
     env_file:
       - .env
 
   dashboard:
     build: .
-    command: streamlit run dashboard/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+    command: sh -c "streamlit run dashboard/streamlit_app.py --server.port $${STREAMLIT_PORT:-8501} --server.address 0.0.0.0"
     depends_on:
       - backend
     ports:
-      - "8501:8501"
+      - "${STREAMLIT_PORT:-8501}:${STREAMLIT_PORT:-8501}"
     env_file:
       - .env
 

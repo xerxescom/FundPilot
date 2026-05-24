@@ -12,4 +12,7 @@ class ReportOut(BaseModel):
     title: str | None = None
     content: str
     model_name: str | None = None
+    is_fallback: bool = False
+    fallback_reason: str | None = None
+    input_snapshot: str | None = None
     created_at: datetime

@@ -46,17 +46,35 @@ def ensure_schema_compatibility() -> None:
 
     inspector = inspect(engine)
     if "watchlist" not in inspector.get_table_names():
-        return
-
-    columns = {column["name"] for column in inspector.get_columns("watchlist")}
-    missing_columns = {
-        "fund_name": "VARCHAR(255)",
-        "industry": "VARCHAR(100)",
+        watchlist_columns = set()
+    else:
+        watchlist_columns = {column["name"] for column in inspector.get_columns("watchlist")}
+    table_columns = {
+        "watchlist": {
+            "columns": watchlist_columns,
+            "missing": {
+                "fund_name": "VARCHAR(255)",
+                "industry": "VARCHAR(100)",
+            },
+        },
+        "ai_report": {
+            "columns": {column["name"] for column in inspector.get_columns("ai_report")}
+            if "ai_report" in inspector.get_table_names()
+            else set(),
+            "missing": {
+                "is_fallback": "BOOLEAN DEFAULT FALSE",
+                "fallback_reason": "TEXT",
+                "input_snapshot": "TEXT",
+            },
+        },
     }
 
     with engine.begin() as conn:
-        for column_name, column_type in missing_columns.items():
-            if column_name in columns:
+        for table_name, config in table_columns.items():
+            if table_name not in inspector.get_table_names():
                 continue
-            if engine.dialect.name in {"postgresql", "sqlite"}:
-                conn.execute(text(f"ALTER TABLE watchlist ADD COLUMN {column_name} {column_type}"))
+            for column_name, column_type in config["missing"].items():
+                if column_name in config["columns"]:
+                    continue
+                if engine.dialect.name in {"postgresql", "sqlite"}:
+                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"))
