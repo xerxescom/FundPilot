@@ -8,7 +8,6 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     database_url: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/fund_watcher"
     backend_port: int = 8000
-    streamlit_port: int = 8501
     sync_nav_cron: str = "18:00"
     enable_scheduler: bool = False
     auto_create_tables: bool = True

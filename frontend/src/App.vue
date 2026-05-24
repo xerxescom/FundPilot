@@ -16,7 +16,7 @@
       <el-header class="topbar">
         <div>
           <div class="page-title">{{ currentTitle }}</div>
-          <div class="page-subtitle">Vue 并行版，Streamlit 保留为功能对照</div>
+          <div class="page-subtitle">Vue 主前端，本地基金投研工作台</div>
         </div>
         <el-tag type="success" effect="plain">FastAPI / Vue 3</el-tag>
       </el-header>

@@ -1,5 +1,6 @@
 <template>
-  <div v-loading="loading">
+  <PageSkeleton v-if="loading && !data" />
+  <div v-else v-loading="loading" element-loading-text="正在刷新首页数据...">
     <div class="metric-grid">
       <MetricCard label="自选基金" :value="data?.watchlist_count ?? 0" />
       <MetricCard label="最高评分" :value="scoreText(bestScore?.total_score)" :hint="bestScore?.rating || '暂无'" />
@@ -32,7 +33,9 @@
         <el-table :data="data?.top_scores || []" border stripe>
           <el-table-column prop="fund_code" label="基金代码" />
           <el-table-column prop="fund_name" label="基金名称" min-width="160" />
-          <el-table-column label="总分"><template #default="{ row }">{{ scoreText(row.total_score) }}</template></el-table-column>
+          <el-table-column label="总分">
+            <template #default="{ row }">{{ scoreText(row.total_score) }}</template>
+          </el-table-column>
           <el-table-column prop="rating" label="评级" />
           <el-table-column prop="reason" label="理由" min-width="260" />
         </el-table>
@@ -78,6 +81,7 @@ import { api } from "../api/fundpilot";
 import { dateText, pct, scoreText } from "../api/format";
 import type { Alert, DataHealth, MarketContext, Report } from "../api/types";
 import MetricCard from "../components/MetricCard.vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
 import ReportCard from "../components/ReportCard.vue";
 
 interface DashboardData {

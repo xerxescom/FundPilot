@@ -31,21 +31,6 @@ services:
       timeout: 5s
       retries: 5
 
-  dashboard:
-    build: .
-    command: sh -c "streamlit run dashboard/streamlit_app.py --server.port $${STREAMLIT_PORT:-8501} --server.address 0.0.0.0"
-    depends_on:
-      - backend
-    ports:
-      - "${STREAMLIT_PORT:-8501}:${STREAMLIT_PORT:-8501}"
-    env_file:
-      - .env
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:' + __import__('os').environ.get('STREAMLIT_PORT', '8501'), timeout=3)\""]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
   frontend:
     image: node:20-alpine
     working_dir: /app

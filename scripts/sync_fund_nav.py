@@ -1,7 +1,7 @@
 """Sync historical NAV data for one fund code.
 
 Use this when you want to manually pull and store one fund's NAV history
-without going through the FastAPI or Streamlit UI.
+without going through the FastAPI or Vue UI.
 
 Run:
     uv run python scripts/sync_fund_nav.py

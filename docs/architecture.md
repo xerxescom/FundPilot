@@ -1,21 +1,36 @@
-# FundPilot 架构说明
+# FundPilot 技术架构
 
-FundPilot 是一个本地单用户基金投研助手，核心由 FastAPI、SQLAlchemy、PostgreSQL、Streamlit、Pandas 和 Ollama 组成。
+FundPilot 是一个本地单用户基金投研助手，核心由 Vue、FastAPI、SQLAlchemy、PostgreSQL、Pandas、APScheduler 和 Ollama 组成。
+
+## 架构图
+
+```mermaid
+flowchart TB
+    User["用户"] --> Vue["Vue 3 前端工作台"]
+    Vue --> API["FastAPI /api/v1"]
+    API --> Services["app/services 业务服务层"]
+    Services --> DB[("PostgreSQL")]
+    Services --> DataSource["AKShare / Eastmoney"]
+    Services --> AI["Ollama / 规则兜底"]
+    Scheduler["APScheduler 定时任务"] --> Services
+    Scripts["scripts 手动任务"] --> Services
+```
 
 ## 模块职责
 
-- `app/data_source`：基金和市场数据源，目前以 AKShare 为主，Eastmoney 作为备用源接口。
+- `frontend`：Vue 3 + TypeScript + Element Plus + ECharts，承担所有前端交互。
+- `app/api/v1`：结构化 HTTP API，供 Vue 调用。
 - `app/services`：业务逻辑，包括净值同步、指标计算、评分、持仓、预警、相关性、数据健康、AI 报告。
-- `app/api/v1`：FastAPI 接口，供看板、自动化脚本或未来前端调用。
-- `app/jobs`：可选定时任务。默认不自动启动，设置 `ENABLE_SCHEDULER=true` 后由 FastAPI lifespan 启动。
-- `dashboard`：Streamlit 本地工作台。
-- `scripts`：手动任务入口和演示辅助脚本。
+- `app/data_source`：基金和市场数据源，以 AKShare 为主，Eastmoney 作为备用与对账来源。
+- `app/db`：SQLAlchemy session、ORM 模型和基础声明。
+- `app/jobs`：可选定时任务，默认关闭，设置 `ENABLE_SCHEDULER=true` 后由 FastAPI lifespan 启动。
+- `scripts`：命令行任务入口，用于本地调试、回填、演示和 smoke check。
 
 ## 核心数据流
 
 ```text
-watchlist -> sync nav -> fund_nav -> indicators -> scores -> dashboard/report
-market indexes -> market_index_daily -> market context -> dashboard/report
+watchlist -> sync nav -> fund_nav -> indicators -> scores -> Vue/report
+market indexes -> market_index_daily -> market context -> Vue/report
 portfolio_position + latest nav -> portfolio overview -> alerts/report
 fund_nav daily_return -> correlation -> duplicate allocation alerts
 task execution -> task_run_log -> task center
