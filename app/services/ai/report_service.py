@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import AIReport, AlertEvent, FundIndicator, FundInfo, FundScore, Watchlist
-from app.services import correlation_service, market_service, portfolio_service, score_service
+from app.services import correlation_service, data_health_service, market_service, portfolio_service, score_service
 from app.services.ai.ollama_client import OllamaClient
 from app.services.ai.prompt_templates import DAILY_REPORT_PROMPT, FUND_EXPLAIN_PROMPT
 
@@ -36,9 +36,11 @@ def _fallback_report(data: dict) -> str:
         if item.get("daily_return") is not None and item.get("return_1m") is not None
     ]
     portfolio = data.get("portfolio_overview", {})
+    health = data.get("data_health", {})
     return (
         "今日概况\n"
-        "系统已基于本地净值、指标和评分数据生成规则摘要。\n\n"
+        "系统已基于本地净值、指标和评分数据生成规则摘要。"
+        f"当前需关注数据质量的基金数量：{health.get('stale_fund_count', 0)}。\n\n"
         "市场背景\n"
         f"{chr(10).join(market_lines) if market_lines else '暂无市场指数数据。'}\n\n"
         "组合表现\n"
@@ -81,11 +83,18 @@ def collect_daily_report_data(db: Session) -> dict:
     portfolio = portfolio_service.portfolio_overview(db)
     market_context = market_service.latest_market_context(db)
     high_correlation_pairs = correlation_service.high_correlation_pairs(db)
+    data_health = data_health_service.data_health_overview(db)
     return {
         "watchlist_count": len(watchlist),
         "score_count": len(scores),
         "alert_count": len(alerts),
         "market_context": market_context,
+        "data_health": {
+            "latest_nav_date": data_health["latest_nav_date"],
+            "stale_fund_count": data_health["stale_fund_count"],
+            "pending_indicator_count": data_health["pending_indicator_count"],
+            "gap_count": data_health["gap_count"],
+        },
         "portfolio_overview": {
             "total_value": float(portfolio["total_value"]) if portfolio["total_value"] is not None else None,
             "total_cost": float(portfolio["total_cost"]) if portfolio["total_cost"] is not None else None,
@@ -227,6 +236,17 @@ def latest_report(db: Session, report_type: str = "daily") -> AIReport | None:
         .where(AIReport.report_type == report_type)
         .order_by(AIReport.created_at.desc())
         .limit(1)
+    )
+
+
+def report_history(db: Session, report_type: str = "daily", limit: int = 30) -> list[AIReport]:
+    return list(
+        db.scalars(
+            select(AIReport)
+            .where(AIReport.report_type == report_type)
+            .order_by(AIReport.created_at.desc())
+            .limit(limit)
+        )
     )
 
 

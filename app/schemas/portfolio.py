@@ -13,6 +13,16 @@ class PortfolioCreate(BaseModel):
     note: str | None = None
 
 
+class PortfolioTransactionCreate(BaseModel):
+    fund_code: str
+    trade_date: date
+    amount: Decimal
+    nav: Decimal
+    share: Decimal | None = None
+    fee: Decimal | None = None
+    note: str | None = None
+
+
 class PortfolioUpdate(BaseModel):
     holding_amount: Decimal | None = None
     holding_share: Decimal | None = None
@@ -30,6 +40,20 @@ class PortfolioOut(BaseModel):
     holding_share: Decimal | None = None
     cost_nav: Decimal | None = None
     buy_date: date | None = None
+    note: str | None = None
+
+
+class PortfolioTransactionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    fund_code: str
+    trade_date: date
+    trade_type: str
+    amount: Decimal
+    nav: Decimal
+    share: Decimal
+    fee: Decimal | None = None
     note: str | None = None
 
 

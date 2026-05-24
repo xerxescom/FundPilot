@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import date
+import ast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import FundIndicator, FundNav, Watchlist
+from app.db.models import FundIndicator, FundNav, TaskRunLog, Watchlist
 
 STALE_NAV_DAYS = 7
 NAV_GAP_DAYS = 10
@@ -29,6 +30,28 @@ def _nav_dates(db: Session, fund_code: str) -> list[date]:
     )
 
 
+def _latest_sync_status(db: Session, fund_code: str) -> tuple[str | None, str | None, date | None]:
+    logs = db.scalars(
+        select(TaskRunLog)
+        .where(TaskRunLog.task_name.in_(["update_fund_nav", "manual_sync_watchlist_nav"]))
+        .order_by(TaskRunLog.created_at.desc())
+        .limit(20)
+    ).all()
+    for log in logs:
+        if not log.message or fund_code not in log.message:
+            continue
+        try:
+            data = ast.literal_eval(log.message)
+        except (SyntaxError, ValueError):
+            continue
+        if isinstance(data, dict) and fund_code in data:
+            value = data[fund_code]
+            if isinstance(value, str) and value.startswith("failed:"):
+                return "failed", value.removeprefix("failed:").strip(), log.created_at.date()
+            return "success", None, log.created_at.date()
+    return None, None, None
+
+
 def fund_data_health(db: Session, fund_code: str, today: date | None = None) -> dict:
     fund_code = fund_code.zfill(6)
     today = today or date.today()
@@ -47,7 +70,9 @@ def fund_data_health(db: Session, fund_code: str, today: date | None = None) -> 
     ).all()
     gap_count = sum(1 for left, right in zip(dates, dates[1:]) if (right - left).days > NAV_GAP_DAYS)
     latest_indicator_date = _latest_indicator_date(db, fund_code)
+    latest_sync_status, latest_failure_reason, latest_sync_date = _latest_sync_status(db, fund_code)
     is_stale = latest_nav_date is None or (today - latest_nav_date).days > STALE_NAV_DAYS
+    stale_days = (today - latest_nav_date).days if latest_nav_date else None
     needs_indicator = bool(latest_nav_date and (latest_indicator_date is None or latest_indicator_date < latest_nav_date))
     status = "正常"
     issues = []
@@ -77,6 +102,10 @@ def fund_data_health(db: Session, fund_code: str, today: date | None = None) -> 
         "duplicate_date_count": len(duplicate_rows),
         "missing_daily_return_count": missing_return_count or 0,
         "latest_indicator_date": latest_indicator_date,
+        "latest_sync_status": latest_sync_status,
+        "latest_failure_reason": latest_failure_reason,
+        "latest_sync_date": latest_sync_date,
+        "stale_days": stale_days,
         "needs_indicator": needs_indicator,
         "is_stale": is_stale,
         "status": status,
@@ -89,9 +118,11 @@ def data_health_overview(db: Session, today: date | None = None) -> dict:
     funds = [fund_data_health(db, item.fund_code, today=today) for item in items]
     status_counts = Counter(item["status"] for item in funds)
     latest_dates = [item["latest_nav_date"] for item in funds if item["latest_nav_date"]]
+    latest_available_trade_date = max(latest_dates) if latest_dates else None
     return {
         "watchlist_count": len(items),
         "latest_nav_date": max(latest_dates) if latest_dates else None,
+        "latest_available_trade_date": latest_available_trade_date,
         "stale_fund_count": sum(1 for item in funds if item["is_stale"]),
         "failed_fund_count": sum(1 for item in funds if item["nav_count"] == 0),
         "pending_indicator_count": sum(1 for item in funds if item["needs_indicator"]),

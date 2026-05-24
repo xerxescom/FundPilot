@@ -7,10 +7,18 @@ from app.db.session import get_db
 from app.schemas.fund import FundInfoOut, FundNavOut
 from app.schemas.indicator import IndicatorOut
 from app.schemas.score import ScoreOut
-from app.services import indicator_service, nav_service, score_service
+from app.services import indicator_service, nav_service, research_service, score_service
 
 router = APIRouter()
 recommendation_router = APIRouter()
+
+
+@router.get("/compare")
+def compare_funds(codes: str = Query(..., min_length=1), db: Session = Depends(get_db)):
+    code_list = [code.strip() for code in codes.split(",") if code.strip()]
+    if len(code_list) < 2 or len(code_list) > 5:
+        raise HTTPException(status_code=400, detail="Please provide 2-5 fund codes")
+    return research_service.compare_funds(db, code_list)
 
 
 @router.get("/{fund_code}", response_model=FundInfoOut)
@@ -30,6 +38,12 @@ def get_nav(fund_code: str, db: Session = Depends(get_db)):
 def sync_nav(fund_code: str, db: Session = Depends(get_db)):
     count = nav_service.sync_fund_nav(db, fund_code)
     return {"fund_code": fund_code.zfill(6), "synced_rows": count}
+
+
+@router.post("/{fund_code}/retry-sync")
+def retry_sync_nav(fund_code: str, db: Session = Depends(get_db)):
+    count = nav_service.sync_fund_nav(db, fund_code)
+    return {"fund_code": fund_code.zfill(6), "synced_rows": count, "status": "success"}
 
 
 @router.post("/{fund_code}/calc-indicators", response_model=IndicatorOut)

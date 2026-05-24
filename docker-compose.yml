@@ -10,6 +10,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fund_watcher"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
     build: .
@@ -20,6 +25,11 @@ services:
       - "${BACKEND_PORT:-8000}:${BACKEND_PORT:-8000}"
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:' + __import__('os').environ.get('BACKEND_PORT', '8000') + '/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   dashboard:
     build: .
@@ -30,6 +40,11 @@ services:
       - "${STREAMLIT_PORT:-8501}:${STREAMLIT_PORT:-8501}"
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:' + __import__('os').environ.get('STREAMLIT_PORT', '8501'), timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

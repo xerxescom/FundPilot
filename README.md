@@ -142,17 +142,30 @@ OLLAMA_TIMEOUT=180
 ## API 补充
 
 - `GET /api/v1/data/health`：查看自选基金净值健康状态、断档、缺失涨跌幅、待计算指标数量。
+- `GET /api/v1/data/reconcile/{fund_code}`：查看 AKShare 与 Eastmoney 净值对账结果。
+- `GET /api/v1/funds/compare?codes=000001,000002`：横向比较 2-5 只基金的指标、评分和相关性。
+- `POST /api/v1/funds/{fund_code}/retry-sync`：重试单只基金净值同步。
+- `GET /api/v1/scores/trend/{fund_code}`：查看基金评分趋势。
+- `GET /api/v1/reports/history`：查看历史日报。
 - `GET /api/v1/tasks/logs`：查看最近任务执行日志、耗时和失败原因。
+- `POST /api/v1/tasks/run/{task_name}`：手动触发同步、计算、预警或日报任务。
 - `GET /api/v1/reports/context/latest`：查看生成 AI 日报所使用的结构化输入摘要。
 - `PUT /api/v1/portfolio/{position_id}`：编辑持仓。
 - `DELETE /api/v1/portfolio/{position_id}`：删除持仓。
+- `POST /api/v1/portfolio/transactions`：新增单笔买入记录，并自动汇总持仓。
+- `GET /api/v1/portfolio/transactions`：查看买入记录。
+- `DELETE /api/v1/portfolio/transactions/{transaction_id}`：删除买入记录并重新汇总持仓。
 
 ## Streamlit 页面补充
 
 - 首页增加“数据状态”，用于发现净值过旧、断档和待计算指标。
-- 我的持仓支持新增、编辑和删除，并展示最高单基占比、组合近 1 月回撤。
+- 数据质量页支持查看健康明细和多数据源对账。
+- 基金对比页支持 2-5 只基金横向比较、行业汇总和风险收益散点。
+- 评分趋势页支持查看单只基金历史评分变化。
+- 我的持仓支持按每次买入金额和成交净值录入，自动汇总份额、投入金额和平均成本；也保留手动汇总持仓入口。
 - AI 简报展示生成模型、生成时间、是否规则兜底、失败原因和输入数据摘要。
-- 系统任务展示最近任务日志，便于排查同步和计算失败。
+- 报告历史页支持查看历史日报和当时输入数据。
+- 任务中心展示最近任务日志，并支持按任务名称手动触发。
 
 ## 数据库迁移
 
@@ -184,6 +197,13 @@ docker compose up --build
 ## 作品集演示
 
 建议参考 [docs/demo_script.md](docs/demo_script.md) 进行 5 分钟演示，重点展示数据链路、规则评分、风险预警和 AI 兜底能力。
+
+补充文档：
+
+- [架构说明](docs/architecture.md)
+- [数据库说明](docs/database.md)
+- [评分模型说明](docs/scoring_model.md)
+- [AI 安全边界](docs/ai_safety.md)
 
 ## 重要边界
 

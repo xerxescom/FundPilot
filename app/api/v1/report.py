@@ -21,6 +21,11 @@ def latest_report(db: Session = Depends(get_db)):
     return report
 
 
+@router.get("/history", response_model=list[ReportOut])
+def report_history(limit: int = 30, db: Session = Depends(get_db)):
+    return report_service.report_history(db, limit=limit)
+
+
 @router.get("/context/latest")
 def latest_report_context(db: Session = Depends(get_db)):
     return report_service.latest_daily_context(db)

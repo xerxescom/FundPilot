@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from decimal import Decimal
 
 import pandas as pd
@@ -16,11 +17,14 @@ from app.services import (
     market_service,
     nav_service,
     portfolio_service,
+    reconcile_service,
+    research_service,
     score_service,
     task_log_service,
+    task_runner_service,
     watchlist_service,
 )
-from app.services.ai.report_service import generate_daily_report, latest_report
+from app.services.ai.report_service import generate_daily_report, latest_report, report_history
 from app.services.ai.ollama_client import OllamaClient
 
 st.set_page_config(page_title="FundPilot", layout="wide", initial_sidebar_state="expanded")
@@ -357,9 +361,91 @@ def task_log_rows(logs) -> list[dict]:
     ]
 
 
+def task_result_rows(result: dict | list | str | int) -> list[dict]:
+    if isinstance(result, dict):
+        return [
+            {
+                "对象": key,
+                "结果": "失败" if isinstance(value, str) and value.startswith("failed:") else "成功",
+                "详情": value,
+            }
+            for key, value in result.items()
+        ]
+    if isinstance(result, list):
+        return [{"序号": index + 1, "结果": value} for index, value in enumerate(result)]
+    return [{"结果": result}]
+
+
+def reconcile_count_rows(counts: dict) -> list[dict]:
+    labels = {
+        "akshare_missing": "AKShare 缺失日期",
+        "eastmoney_missing": "Eastmoney 缺失日期",
+        "unit_nav_diff": "单位净值差异",
+        "daily_return_diff": "日涨跌幅差异",
+    }
+    return [{"项目": labels.get(key, key), "数量": value} for key, value in counts.items()]
+
+
+def reconcile_rows(rows: list[dict]) -> list[dict]:
+    return [
+        {
+            "日期": item.get("nav_date"),
+            "AKShare 单位净值": item.get("akshare_unit_nav"),
+            "Eastmoney 单位净值": item.get("eastmoney_unit_nav"),
+            "单位净值差异": item.get("unit_nav_diff"),
+            "AKShare 日涨跌幅": item.get("akshare_daily_return"),
+            "Eastmoney 日涨跌幅": item.get("eastmoney_daily_return"),
+            "日涨跌幅差异": item.get("daily_return_diff"),
+            "对账状态": item.get("status"),
+        }
+        for item in rows
+    ]
+
+
+def display_industry_rows(rows: list[dict]) -> list[dict]:
+    return [
+        {
+            "行业/主题": item.get("industry"),
+            "基金数量": item.get("fund_count"),
+            "平均评分": item.get("avg_score"),
+            "持仓市值": item.get("position_value"),
+            "持仓占比": pct(item.get("position_weight")),
+        }
+        for item in rows
+    ]
+
+
+def score_trend_rows(rows: list[dict]) -> list[dict]:
+    return [
+        {
+            "基金代码": item.get("fund_code"),
+            "评分日期": item.get("score_date"),
+            "总分": item.get("total_score"),
+            "评级": item.get("rating"),
+            "收益分": item.get("return_score"),
+            "回撤分": item.get("drawdown_score"),
+            "波动分": item.get("volatility_score"),
+            "稳定性分": item.get("stability_score"),
+            "规模分": item.get("size_score"),
+            "交易状态分": item.get("trade_status_score"),
+        }
+        for item in rows
+    ]
+
+
+def ollama_status_rows(status: dict) -> list[dict]:
+    labels = {
+        "base_url": "服务地址",
+        "configured_model": "配置模型",
+        "model_available": "模型是否可用",
+        "models": "本地模型列表",
+    }
+    return [{"项目": labels.get(key, key), "值": value} for key, value in status.items()]
+
+
 def render_report_metadata(report) -> None:
     c1, c2, c3 = st.columns(3)
-    c1.metric("生成模型", report.model_name or "unknown")
+    c1.metric("生成模型", report.model_name or "未知")
     c2.metric("生成时间", f"{report.created_at:%Y-%m-%d %H:%M}")
     c3.metric("兜底状态", "规则兜底" if report.is_fallback else "模型生成")
     if report.fallback_reason:
@@ -565,7 +651,21 @@ st.sidebar.title("FundPilot")
 st.sidebar.caption("本地基金投研助手")
 page = st.sidebar.radio(
     "导航",
-    ["首页概览", "市场概览", "自选基金", "我的持仓", "基金详情", "评分排行", "相关性分析", "AI 简报", "系统任务"],
+    [
+        "首页概览",
+        "数据质量",
+        "市场概览",
+        "自选基金",
+        "我的持仓",
+        "基金详情",
+        "基金对比",
+        "评分排行",
+        "评分趋势",
+        "相关性分析",
+        "AI 简报",
+        "报告历史",
+        "任务中心",
+    ],
 )
 
 st.title("FundPilot 本地基金投研助手")
@@ -640,6 +740,46 @@ if page == "首页概览":
     for idx, item in enumerate(market_context[:4]):
         with market_cols[idx % 4]:
             metric_card(item["index_name"], item.get("daily_return"), kind="return")
+
+elif page == "数据质量":
+    section("数据质量", "检查净值同步、断档、缺失涨跌幅和多数据源对账结果。")
+    with db_session() as db:
+        health = data_health_service.data_health_overview(db)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("最新可用交易日", date_value(health["latest_available_trade_date"]))
+    c2.metric("需关注基金", health["stale_fund_count"])
+    c3.metric("待计算指标", health["pending_indicator_count"])
+    c4.metric("缺失涨跌幅", health["missing_daily_return_count"])
+    st.dataframe(
+        [
+            {
+                "基金代码": item["fund_code"],
+                "状态": item["status"],
+                "最新净值": item["latest_nav_date"],
+                "过旧天数": item["stale_days"],
+                "最近同步": item["latest_sync_date"],
+                "同步状态": item["latest_sync_status"] or "-",
+                "失败原因": item["latest_failure_reason"] or "-",
+                "问题": "；".join(item["issues"]) if item["issues"] else "正常",
+            }
+            for item in health["funds"]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+    section("数据源对账", "比较 AKShare 与 Eastmoney 最近净值数据，发现日期缺失或数值差异。")
+    codes = load_watchlist_codes()
+    selected = st.selectbox("选择基金", options=codes, index=0 if codes else None)
+    if st.button("执行对账", use_container_width=True) and selected:
+        with st.spinner("正在拉取两个数据源并对账..."):
+            result = reconcile_service.reconcile_fund_nav(selected_code(selected))
+        st.info(result["summary"])
+        if result.get("counts"):
+            st.dataframe(reconcile_count_rows(result["counts"]), use_container_width=True, hide_index=True)
+        if result.get("source_errors"):
+            st.caption(f"数据源错误：{result['source_errors']}")
+        if result.get("rows"):
+            st.dataframe(reconcile_rows(result["rows"]), use_container_width=True, hide_index=True)
 
 elif page == "市场概览":
     section("市场概览", "主要指数表现会进入每日简报，作为自选基金变化的背景信息。")
@@ -717,31 +857,62 @@ elif page == "自选基金":
             st.info("没有 active 自选基金。")
 
 elif page == "我的持仓":
-    section("我的持仓", "维护持仓后，系统会计算组合市值、盈亏和持仓集中度。")
-    with st.form("add_position", clear_on_submit=True):
-        c1, c2, c3, c4 = st.columns(4)
-        fund_code = c1.text_input("基金代码", placeholder="000001")
-        holding_share = c2.number_input("持有份额", min_value=0.0, step=100.0)
-        cost_nav = c3.number_input("成本净值", min_value=0.0, step=0.01)
-        holding_amount = c4.number_input("投入金额", min_value=0.0, step=100.0)
-        note = st.text_input("备注")
-        submitted = st.form_submit_button("添加持仓", use_container_width=True)
+    section("我的持仓", "优先录入每次买入记录，系统会自动汇总份额、投入金额和平均成本。")
+    with st.form("add_transaction", clear_on_submit=True):
+        t1, t2, t3, t4 = st.columns(4)
+        fund_code = t1.text_input("基金代码", placeholder="000001")
+        trade_date = t2.date_input("买入日期", value=date.today())
+        amount = t3.number_input("买入金额", min_value=0.0, step=100.0)
+        nav = t4.number_input("成交净值", min_value=0.0, step=0.01, format="%.4f")
+        fee = st.number_input("手续费", min_value=0.0, step=1.0)
+        note = st.text_input("备注", placeholder="例如：定投、补仓")
+        submitted = st.form_submit_button("添加买入记录并自动汇总", use_container_width=True)
     if submitted and fund_code:
-        with db_session() as db:
-            portfolio_service.create_position(
-                db,
-                {
-                    "fund_code": fund_code,
-                    "holding_share": Decimal(str(holding_share)) if holding_share else None,
-                    "cost_nav": Decimal(str(cost_nav)) if cost_nav else None,
-                    "holding_amount": Decimal(str(holding_amount)) if holding_amount else None,
-                    "note": note or None,
-                },
-            )
-        st.success("持仓已添加")
+        try:
+            with db_session() as db:
+                transaction = portfolio_service.create_transaction(
+                    db,
+                    {
+                        "fund_code": fund_code,
+                        "trade_date": trade_date,
+                        "amount": Decimal(str(amount)),
+                        "nav": Decimal(str(nav)),
+                        "fee": Decimal(str(fee)) if fee else None,
+                        "note": note or None,
+                    },
+                )
+            st.success(f"买入记录已添加，自动计算份额 {transaction.share}")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"添加买入记录失败：{exc}")
+
+    with st.expander("手动录入汇总持仓"):
+        st.caption("如果你已经从其他平台算好了总份额和成本，可以继续用这里直接录入汇总值。")
+        with st.form("add_position", clear_on_submit=True):
+            c1, c2, c3, c4 = st.columns(4)
+            fund_code = c1.text_input("汇总基金代码", placeholder="000001")
+            holding_share = c2.number_input("汇总持有份额", min_value=0.0, step=100.0)
+            cost_nav = c3.number_input("汇总成本净值", min_value=0.0, step=0.01)
+            holding_amount = c4.number_input("汇总投入金额", min_value=0.0, step=100.0)
+            note = st.text_input("汇总备注")
+            submitted = st.form_submit_button("添加汇总持仓", use_container_width=True)
+        if submitted and fund_code:
+            with db_session() as db:
+                portfolio_service.create_position(
+                    db,
+                    {
+                        "fund_code": fund_code,
+                        "holding_share": Decimal(str(holding_share)) if holding_share else None,
+                        "cost_nav": Decimal(str(cost_nav)) if cost_nav else None,
+                        "holding_amount": Decimal(str(holding_amount)) if holding_amount else None,
+                        "note": note or None,
+                    },
+                )
+            st.success("汇总持仓已添加")
 
     with db_session() as db:
         overview = portfolio_service.portfolio_overview(db)
+        transactions = portfolio_service.list_transactions(db)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("当前市值", money(overview["total_value"]))
@@ -751,6 +922,34 @@ elif page == "我的持仓":
     c5, c6 = st.columns(2)
     c5.metric("最高单基占比", pct(overview.get("max_weight")))
     c6.metric("组合近1月回撤", pct(overview.get("drawdown_1m")))
+
+    if transactions:
+        section("买入记录", "每条记录都会参与自动汇总持仓。删除记录后，对应基金持仓会重新计算。")
+        st.dataframe(
+            [
+                {
+                    "ID": item.id,
+                    "基金代码": item.fund_code,
+                    "买入日期": item.trade_date,
+                    "买入金额": float(item.amount),
+                    "成交净值": float(item.nav),
+                    "份额": float(item.share),
+                    "手续费": float(item.fee or 0),
+                    "备注": item.note,
+                }
+                for item in transactions
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        transaction_options = [f"{item.id} - {item.fund_code} - {item.trade_date}" for item in transactions]
+        selected_transaction = st.selectbox("选择要删除的买入记录", transaction_options)
+        if st.button("删除买入记录并重新汇总", use_container_width=True):
+            transaction_id = int(selected_transaction.split(" - ", 1)[0])
+            with db_session() as db:
+                portfolio_service.delete_transaction(db, transaction_id)
+            st.success("买入记录已删除，持仓已重新汇总")
+            st.rerun()
 
     rows = []
     total_value = overview["total_value"] or Decimal("0")
@@ -945,6 +1144,91 @@ elif page == "基金详情":
             hide_index=True,
         )
 
+elif page == "基金对比":
+    section("基金对比", "选择 2-5 只自选基金，横向比较收益、回撤、波动、夏普、评分和行业信息。")
+    codes = load_watchlist_codes()
+    selected = st.multiselect("选择基金", options=codes, default=codes[: min(3, len(codes))])
+    if len(selected) < 2:
+        st.info("至少选择两只基金。")
+    elif len(selected) > 5:
+        st.warning("最多选择 5 只基金，避免图表过于拥挤。")
+    else:
+        code_list = [selected_code(item) for item in selected]
+        with db_session() as db:
+            comparison = research_service.compare_funds(db, code_list)
+            industry_rows = research_service.industry_overview(db)
+            risk_return = research_service.risk_return_points(db)
+        rows = comparison["funds"]
+        st.dataframe(
+            [
+                {
+                    "基金代码": row["fund_code"],
+                    "基金名称": row["fund_name"],
+                    "行业/主题": row["industry"],
+                    "近1月": pct(row["return_1m"]),
+                    "近3月": pct(row["return_3m"]),
+                    "近1年": pct(row["return_1y"]),
+                    "最大回撤": pct(row["max_drawdown_1y"]),
+                    "波动率": pct(row["volatility_1y"]),
+                    "夏普": score_value(row["sharpe_1y"]),
+                    "胜率": pct(row["win_rate_1y"]),
+                    "总分": score_value(row["score"]),
+                    "评级": row["rating"],
+                }
+                for row in rows
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        chart_df = pd.DataFrame(rows).dropna(subset=["return_1y", "max_drawdown_1y"])
+        if not chart_df.empty:
+            fig = px.scatter(
+                chart_df,
+                x="max_drawdown_1y",
+                y="return_1y",
+                size="score",
+                color="industry",
+                hover_name="fund_name",
+                text="fund_code",
+                labels={"max_drawdown_1y": "近1年最大回撤", "return_1y": "近1年收益"},
+            )
+            fig.update_layout(template="plotly_white", height=420, margin={"l": 10, "r": 10, "t": 20, "b": 10})
+            fig.update_xaxes(tickformat=".0%")
+            fig.update_yaxes(tickformat=".0%")
+            st.plotly_chart(fig, use_container_width=True)
+        if comparison["correlation"]:
+            section("选择基金相关性")
+            st.dataframe(
+                [
+                    {"基金组合": key, "相关系数": value}
+                    for key, value in comparison["correlation"].items()
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        section("行业/主题汇总", "按自选基金行业聚合数量、平均评分和持仓占比。")
+        st.dataframe(display_industry_rows(industry_rows), use_container_width=True, hide_index=True)
+        if risk_return:
+            section("全自选风险收益散点")
+            scatter_df = pd.DataFrame(risk_return).dropna(subset=["return_1y", "volatility_1y"])
+            if not scatter_df.empty:
+                scatter_df["display_weight"] = scatter_df["position_weight"].clip(lower=0.02)
+                fig = px.scatter(
+                    scatter_df,
+                    x="volatility_1y",
+                    y="return_1y",
+                    size="display_weight",
+                    color="industry",
+                    hover_name="fund_name",
+                    text="fund_code",
+                    labels={"volatility_1y": "近1年波动率", "return_1y": "近1年收益"},
+                )
+                fig.update_layout(template="plotly_white", height=420, margin={"l": 10, "r": 10, "t": 20, "b": 10})
+                fig.update_xaxes(tickformat=".0%")
+                fig.update_yaxes(tickformat=".0%")
+                st.plotly_chart(fig, use_container_width=True)
+
 elif page == "评分排行":
     with db_session() as db:
         scores = score_service.top_scores(db, limit=100)
@@ -999,6 +1283,40 @@ elif page == "评分排行":
         fig.update_xaxes(range=[0, 105], showgrid=True, gridcolor="#eef2f7")
         fig.update_yaxes(showgrid=False)
         st.plotly_chart(fig, use_container_width=True)
+
+elif page == "评分趋势":
+    section("评分趋势", "查看单只基金历史评分变化，以及分项分的贡献。")
+    codes = load_watchlist_codes()
+    selected = st.selectbox("选择基金", options=codes, index=0 if codes else None)
+    if not selected:
+        st.info("先添加自选基金并计算评分。")
+    else:
+        with db_session() as db:
+            rows = research_service.score_trend(db, selected_code(selected))
+        if not rows:
+            st.info("暂无评分历史。")
+        else:
+            trend_df = pd.DataFrame(rows)
+            st.dataframe(score_trend_rows(rows), use_container_width=True, hide_index=True)
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=trend_df["score_date"],
+                    y=trend_df["total_score"],
+                    mode="lines+markers",
+                    name="总分",
+                    line={"color": "#2563eb", "width": 2},
+                )
+            )
+            fig.update_layout(
+                template="plotly_white",
+                height=360,
+                margin={"l": 10, "r": 10, "t": 20, "b": 10},
+                xaxis_title=None,
+                yaxis_title="总分",
+            )
+            fig.update_yaxes(range=[0, 100], showgrid=True, gridcolor="#eef2f7")
+            st.plotly_chart(fig, use_container_width=True)
 
 elif page == "相关性分析":
     section("相关性分析", "基于自选基金日收益率计算，用于发现重复配置。")
@@ -1135,7 +1453,7 @@ elif page == "AI 简报":
                     f"Ollama 可连接，但没有找到配置模型：{status['configured_model']}。"
                     "请确认模型名称或先执行 ollama pull。"
                 )
-            st.json(status)
+            st.dataframe(ollama_status_rows(status), use_container_width=True, hide_index=True)
         except Exception as exc:
             st.error(f"Ollama 连接失败：{exc}")
     else:
@@ -1147,8 +1465,27 @@ elif page == "AI 简报":
         else:
             st.info("暂无简报。")
 
-elif page == "系统任务":
-    section("手动批处理", "按数据链路顺序执行：同步净值、计算指标、计算评分、生成预警。")
+elif page == "报告历史":
+    section("报告历史", "按时间查看历史 AI 日报，并可展开当时的结构化输入摘要。")
+    with db_session() as db:
+        reports = report_history(db, limit=50)
+    if not reports:
+        st.info("暂无历史日报。")
+    else:
+        options = [f"{report.id} - {report.created_at:%Y-%m-%d %H:%M} - {report.model_name}" for report in reports]
+        selected_report = st.selectbox("选择日报", options=options)
+        report_id = int(selected_report.split(" - ", 1)[0])
+        report = next(item for item in reports if item.id == report_id)
+        render_report_metadata(report)
+        st.markdown(report.content)
+
+elif page == "任务中心":
+    section("任务中心", "按数据链路顺序执行：同步净值、计算指标、计算评分、生成预警。")
+    with db_session() as db:
+        health = data_health_service.data_health_overview(db)
+    c0, c00 = st.columns(2)
+    c0.metric("待计算指标", health["pending_indicator_count"])
+    c00.metric("需关注数据", health["stale_fund_count"])
     c1, c2 = st.columns(2)
     with c1:
         st.markdown('<div class="task-button-note">拉取所有启用自选基金的历史净值。</div>', unsafe_allow_html=True)
@@ -1166,51 +1503,67 @@ elif page == "系统任务":
         alert_clicked = st.button("生成风险预警", use_container_width=True, type="primary")
 
     market_clicked = st.button("同步市场数据", use_container_width=True)
+    daily_report_clicked = st.button("生成每日简报", use_container_width=True)
 
     if sync_nav_clicked:
         with st.spinner("正在同步自选基金净值..."):
             with db_session() as db:
-                st.json(task_log_service.run_logged(db, "manual_sync_watchlist_nav", lambda: nav_service.sync_watchlist_nav(db)))
+                result = task_log_service.run_logged(db, "manual_sync_watchlist_nav", lambda: nav_service.sync_watchlist_nav(db))
+            st.dataframe(task_result_rows(result), use_container_width=True, hide_index=True)
     if calc_indicator_clicked:
         with st.spinner("正在计算全部指标..."):
             with db_session() as db:
-                st.json(
-                    task_log_service.run_logged(
-                        db,
-                        "manual_calc_indicators",
-                        lambda: indicator_service.calculate_watchlist_indicators(db),
-                    )
+                result = task_log_service.run_logged(
+                    db,
+                    "manual_calc_indicators",
+                    lambda: indicator_service.calculate_watchlist_indicators(db),
                 )
+            st.dataframe(task_result_rows(result), use_container_width=True, hide_index=True)
     if calc_score_clicked:
         with st.spinner("正在计算全部评分..."):
             with db_session() as db:
-                st.json(
-                    task_log_service.run_logged(
-                        db,
-                        "manual_calc_scores",
-                        lambda: score_service.calculate_watchlist_scores(db),
-                    )
+                result = task_log_service.run_logged(
+                    db,
+                    "manual_calc_scores",
+                    lambda: score_service.calculate_watchlist_scores(db),
                 )
+            st.dataframe(task_result_rows(result), use_container_width=True, hide_index=True)
     if alert_clicked:
         with st.spinner("正在生成风险预警..."):
             with db_session() as db:
-                st.write(
-                    task_log_service.run_logged(
-                        db,
-                        "manual_generate_alerts",
-                        lambda: [alert.title for alert in alert_service.generate_alerts(db)],
-                    )
+                result = task_log_service.run_logged(
+                    db,
+                    "manual_generate_alerts",
+                    lambda: [alert.title for alert in alert_service.generate_alerts(db)],
                 )
+            st.dataframe(task_result_rows(result), use_container_width=True, hide_index=True)
     if market_clicked:
         with st.spinner("正在同步市场数据..."):
             with db_session() as db:
-                st.json(
-                    task_log_service.run_logged(
-                        db,
-                        "manual_sync_market_context",
-                        lambda: market_service.sync_market_context(db),
-                    )
+                result = task_log_service.run_logged(
+                    db,
+                    "manual_sync_market_context",
+                    lambda: market_service.sync_market_context(db),
                 )
+            st.dataframe(task_result_rows(result), use_container_width=True, hide_index=True)
+    if daily_report_clicked:
+        with st.spinner("正在生成每日简报..."):
+            with db_session() as db:
+                result = task_runner_service.run_task(db, "generate_daily_report")
+            st.dataframe(task_result_rows(result), use_container_width=True, hide_index=True)
+
+    section("按名称触发任务", "用于调试和自动化联调。")
+    task_options = {
+        f"{item['description']}（{item['task_name']}）": item["task_name"]
+        for item in task_runner_service.available_tasks()
+    }
+    selected_task_label = st.selectbox("任务名称", list(task_options.keys()))
+    if st.button("运行选中任务", use_container_width=True):
+        selected_task = task_options[selected_task_label]
+        with st.spinner(f"正在运行 {selected_task_label}..."):
+            with db_session() as db:
+                result = task_runner_service.run_task(db, selected_task)
+            st.dataframe(task_result_rows(result), use_container_width=True, hide_index=True)
 
     section("最近任务日志", "展示手动任务和定时任务的执行结果、耗时和失败原因。")
     with db_session() as db:

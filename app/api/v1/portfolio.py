@@ -7,6 +7,8 @@ from app.schemas.portfolio import (
     PortfolioOut,
     PortfolioOverview,
     PortfolioSummary,
+    PortfolioTransactionCreate,
+    PortfolioTransactionOut,
     PortfolioUpdate,
 )
 from app.services import correlation_service, portfolio_service
@@ -17,6 +19,26 @@ router = APIRouter()
 @router.post("", response_model=PortfolioOut)
 def create_position(payload: PortfolioCreate, db: Session = Depends(get_db)):
     return portfolio_service.create_position(db, payload.model_dump())
+
+
+@router.post("/transactions", response_model=PortfolioTransactionOut)
+def create_transaction(payload: PortfolioTransactionCreate, db: Session = Depends(get_db)):
+    try:
+        return portfolio_service.create_transaction(db, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/transactions", response_model=list[PortfolioTransactionOut])
+def list_transactions(fund_code: str | None = None, db: Session = Depends(get_db)):
+    return portfolio_service.list_transactions(db, fund_code)
+
+
+@router.delete("/transactions/{transaction_id}")
+def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
+    if not portfolio_service.delete_transaction(db, transaction_id):
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return {"detail": "deleted"}
 
 
 @router.get("", response_model=list[PortfolioOut])

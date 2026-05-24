@@ -4,7 +4,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import FundNav, PortfolioPosition
+from app.db.models import FundNav, PortfolioPosition, PortfolioTransaction
 from app.services.nav_service import latest_nav
 
 
@@ -15,6 +15,94 @@ def create_position(db: Session, data: dict) -> PortfolioPosition:
     db.commit()
     db.refresh(position)
     return position
+
+
+def _quantize(value: Decimal, places: str) -> Decimal:
+    return value.quantize(Decimal(places))
+
+
+def _rebuild_position_from_transactions(db: Session, fund_code: str) -> PortfolioPosition | None:
+    fund_code = fund_code.zfill(6)
+    transactions = list(
+        db.scalars(
+            select(PortfolioTransaction)
+            .where(PortfolioTransaction.fund_code == fund_code)
+            .order_by(PortfolioTransaction.trade_date.asc(), PortfolioTransaction.id.asc())
+        )
+    )
+    if not transactions:
+        return None
+    total_amount = sum((Decimal(item.amount) for item in transactions), Decimal("0"))
+    total_fee = sum((Decimal(item.fee or 0) for item in transactions), Decimal("0"))
+    total_share = sum((Decimal(item.share) for item in transactions), Decimal("0"))
+    cost_nav = (total_amount + total_fee) / total_share if total_share else None
+    position = db.scalar(select(PortfolioPosition).where(PortfolioPosition.fund_code == fund_code))
+    values = {
+        "holding_amount": _quantize(total_amount + total_fee, "0.0001"),
+        "holding_share": _quantize(total_share, "0.0001"),
+        "cost_nav": _quantize(cost_nav, "0.000001") if cost_nav else None,
+        "buy_date": transactions[0].trade_date,
+        "note": "由买入记录自动汇总",
+    }
+    if position:
+        for key, value in values.items():
+            setattr(position, key, value)
+    else:
+        position = PortfolioPosition(fund_code=fund_code, **values)
+        db.add(position)
+    db.commit()
+    db.refresh(position)
+    return position
+
+
+def create_transaction(db: Session, data: dict) -> PortfolioTransaction:
+    fund_code = data["fund_code"].zfill(6)
+    amount = Decimal(data["amount"])
+    nav = Decimal(data["nav"])
+    fee = Decimal(data.get("fee") or 0)
+    if amount <= 0 or nav <= 0:
+        raise ValueError("amount and nav must be positive")
+    share = Decimal(data.get("share") or 0)
+    if share <= 0:
+        share = amount / nav
+    transaction = PortfolioTransaction(
+        fund_code=fund_code,
+        trade_date=data["trade_date"],
+        trade_type=data.get("trade_type") or "buy",
+        amount=_quantize(amount, "0.0001"),
+        nav=_quantize(nav, "0.000001"),
+        share=_quantize(share, "0.0001"),
+        fee=_quantize(fee, "0.0001"),
+        note=data.get("note"),
+    )
+    db.add(transaction)
+    db.commit()
+    db.refresh(transaction)
+    _rebuild_position_from_transactions(db, fund_code)
+    return transaction
+
+
+def list_transactions(db: Session, fund_code: str | None = None) -> list[PortfolioTransaction]:
+    stmt = select(PortfolioTransaction).order_by(PortfolioTransaction.trade_date.desc(), PortfolioTransaction.id.desc())
+    if fund_code:
+        stmt = stmt.where(PortfolioTransaction.fund_code == fund_code.zfill(6))
+    return list(db.scalars(stmt))
+
+
+def delete_transaction(db: Session, transaction_id: int) -> bool:
+    transaction = db.get(PortfolioTransaction, transaction_id)
+    if not transaction:
+        return False
+    fund_code = transaction.fund_code
+    db.delete(transaction)
+    db.commit()
+    rebuilt = _rebuild_position_from_transactions(db, fund_code)
+    if rebuilt is None:
+        position = db.scalar(select(PortfolioPosition).where(PortfolioPosition.fund_code == fund_code))
+        if position and position.note == "由买入记录自动汇总":
+            db.delete(position)
+            db.commit()
+    return True
 
 
 def list_positions(db: Session) -> list[PortfolioPosition]:
