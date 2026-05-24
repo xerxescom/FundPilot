@@ -2,10 +2,29 @@ from collections.abc import Generator
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
-engine = create_engine(get_settings().database_url, pool_pre_ping=True)
+
+def _build_engine():
+    settings = get_settings()
+    url = settings.database_url
+    # SQLite does not support the connection pool parameters below;
+    # use NullPool (no-op pool) for SQLite to keep tests simple.
+    if url.startswith("sqlite"):
+        return create_engine(url, pool_pre_ping=True, poolclass=NullPool)
+    return create_engine(
+        url,
+        pool_pre_ping=True,   # 检测失效连接，避免"断管道"错误
+        pool_size=10,          # 保持的基础连接数
+        max_overflow=20,       # pool_size 耗尽后允许额外开启的连接数
+        pool_timeout=30,       # 等待空闲连接的超时时间（秒）
+        pool_recycle=3600,     # 强制回收连接，防止 TCP 长连接被防火墙/PostgreSQL 踢掉
+    )
+
+
+engine = _build_engine()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
