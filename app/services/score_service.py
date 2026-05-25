@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.models import FundInfo, FundIndicator, FundNav, FundScore, Watchlist
 from app.services.indicator_service import latest_indicator
 from app.services.nav_service import decimal_or_none
+from app.services import correlation_service, market_service, portfolio_service
 
 SCORE_STRATEGIES = {
     "default": {
@@ -215,6 +216,102 @@ def _buy_window_signal(
     if total_score >= 70:
         return "watch", "综合质量尚可，可继续观察并结合仓位约束判断"
     return "cautious", "综合评分尚未形成足够支持，当前以谨慎观察为主"
+
+
+def _market_signal(db: Session) -> dict:
+    context = market_service.latest_market_context(db)
+    returns = [item["return_1m"] for item in context if item.get("return_1m") is not None]
+    if not returns:
+        return {"market_signal": "neutral", "market_reason": "市场环境数据不足，窗口信号不做市场加成"}
+    avg_return = sum(float(item) for item in returns) / len(returns)
+    if avg_return >= 0.03:
+        return {"market_signal": "supportive", "market_reason": "主要指数近1月整体偏强，对窗口信号形成支持"}
+    if avg_return <= -0.03:
+        return {"market_signal": "weak", "market_reason": "主要指数近1月整体偏弱，窗口信号需要降级观察"}
+    return {"market_signal": "neutral", "market_reason": "主要指数近1月表现中性，市场环境不构成明显加减分"}
+
+
+def _portfolio_fit(db: Session, fund_code: str) -> dict:
+    fund_code = fund_code.zfill(6)
+    overview = portfolio_service.portfolio_overview(db)
+    total_value = overview["total_value"]
+    held_weight = None
+    for item in overview["positions"]:
+        position = item["position"]
+        if position.fund_code == fund_code and total_value and item["current_value"] is not None:
+            held_weight = float(item["current_value"] / total_value)
+            break
+
+    related_pairs = [
+        pair for pair in correlation_service.high_correlation_pairs(db) if fund_code in {pair["fund_a"], pair["fund_b"]}
+    ]
+    score = 85
+    reasons: list[str] = []
+    flags: list[str] = []
+    if held_weight is not None:
+        score -= 25
+        reasons.append(f"该基金已在组合中，当前估算权重约 {held_weight:.1%}")
+        flags.append("already_held")
+        if held_weight >= 0.30:
+            score -= 20
+            reasons.append("持仓权重偏高，继续加仓会放大集中度")
+            flags.append("portfolio_concentration")
+    if related_pairs:
+        score -= 20
+        pair_text = "、".join(
+            pair["fund_b"] if pair["fund_a"] == fund_code else pair["fund_a"] for pair in related_pairs[:3]
+        )
+        reasons.append(f"与组合或自选中的 {pair_text} 相关性较高，分散化贡献有限")
+        flags.append("high_correlation")
+    if not overview["positions"]:
+        reasons.append("当前没有持仓数据，组合适配采用中性偏高评估")
+    if not reasons:
+        reasons.append("未触发持仓集中或高相关规则，组合适配较好")
+
+    score = max(0, min(100, score))
+    level = "high" if score >= 75 else "medium" if score >= 50 else "low"
+    return {
+        "portfolio_fit_score": score,
+        "portfolio_fit_level": level,
+        "portfolio_fit_reason": "；".join(reasons),
+        "portfolio_risk_flags": flags,
+    }
+
+
+def _apply_context(payload: dict, market: dict, portfolio: dict) -> dict:
+    risk_flags = set(payload.get("risk_flags") or [])
+    risk_flags.update(portfolio.get("portfolio_risk_flags") or [])
+    signal = payload.get("buy_window_signal")
+    reason = payload.get("buy_window_reason") or ""
+
+    if market["market_signal"] == "weak" and signal == "favorable":
+        signal = "watch"
+        reason = f"{reason}；但市场环境偏弱，窗口信号降为可以观察"
+        risk_flags.add("market_weak")
+    elif market["market_signal"] == "weak" and signal == "watch":
+        signal = "wait_pullback"
+        reason = f"{reason}；市场环境偏弱，等待趋势确认更稳妥"
+        risk_flags.add("market_weak")
+
+    if portfolio["portfolio_fit_level"] == "low" and signal in {"favorable", "watch"}:
+        signal = "cautious"
+        reason = f"{reason}；组合适配偏低，需先控制集中度或重复配置"
+    elif portfolio["portfolio_fit_level"] == "medium" and signal == "favorable":
+        signal = "watch"
+        reason = f"{reason}；组合适配一般，窗口信号降为观察"
+
+    payload.update(
+        {
+            **market,
+            "portfolio_fit_score": portfolio["portfolio_fit_score"],
+            "portfolio_fit_level": portfolio["portfolio_fit_level"],
+            "portfolio_fit_reason": portfolio["portfolio_fit_reason"],
+            "buy_window_signal": signal,
+            "buy_window_reason": reason,
+            "risk_flags": sorted(risk_flags),
+        }
+    )
+    return payload
 
 
 def score_indicator(
@@ -533,7 +630,7 @@ def score_payload(db: Session, fund_code: str) -> dict | None:
                 "risk_flags": ["indicator_missing"],
             }
         )
-    return payload
+    return _apply_context(payload, _market_signal(db), _portfolio_fit(db, fund_code))
 
 
 def calculate_watchlist_scores(db: Session) -> dict[str, str]:
@@ -610,6 +707,7 @@ def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 
     scored = []
     for indicator, fund in rows:
         item = score_indicator_with_strategy(indicator, fund, strategy, _nav_stats(db, indicator.fund_code))
+        item = _apply_context(item, _market_signal(db), _portfolio_fit(db, indicator.fund_code))
         scored.append(
             {
                 "fund_code": indicator.fund_code,

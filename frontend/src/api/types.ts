@@ -29,6 +29,11 @@ export interface Score {
   buy_window_signal?: Nullable<"favorable" | "watch" | "wait_pullback" | "cautious" | "blocked">;
   buy_window_reason?: Nullable<string>;
   risk_flags?: string[];
+  market_signal?: Nullable<"supportive" | "neutral" | "weak">;
+  market_reason?: Nullable<string>;
+  portfolio_fit_score?: Nullable<number>;
+  portfolio_fit_level?: Nullable<"high" | "medium" | "low">;
+  portfolio_fit_reason?: Nullable<string>;
   strategy?: Nullable<string>;
   strategy_name?: Nullable<string>;
   strategy_scenario?: Nullable<string>;

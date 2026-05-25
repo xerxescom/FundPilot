@@ -39,6 +39,18 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="市场环境" min-width="130">
+          <template #default="{ row }">
+            <el-tag :type="marketTag(row.market_signal)">{{ marketText(row.market_signal) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="组合适配" min-width="130">
+          <template #default="{ row }">
+            <el-tag :type="fitTag(row.portfolio_fit_level)">
+              {{ fitText(row.portfolio_fit_level) }} {{ scoreText(row.portfolio_fit_score) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="rating" label="评级" />
         <el-table-column prop="strategy_name" label="评分策略" min-width="120" />
         <el-table-column label="风险标签" min-width="180">
@@ -119,6 +131,28 @@ function signalTag(signal?: Score["buy_window_signal"]) {
   if (signal === "favorable") return "success";
   if (signal === "watch") return "primary";
   if (signal === "wait_pullback") return "warning";
+  return "danger";
+}
+
+function marketText(signal?: Score["market_signal"]) {
+  const labels = { supportive: "偏强", neutral: "中性", weak: "偏弱" };
+  return signal ? labels[signal] : "暂无";
+}
+
+function marketTag(signal?: Score["market_signal"]) {
+  if (signal === "supportive") return "success";
+  if (signal === "weak") return "warning";
+  return "info";
+}
+
+function fitText(level?: Score["portfolio_fit_level"]) {
+  const labels = { high: "高", medium: "中", low: "低" };
+  return level ? labels[level] : "暂无";
+}
+
+function fitTag(level?: Score["portfolio_fit_level"]) {
+  if (level === "high") return "success";
+  if (level === "medium") return "warning";
   return "danger";
 }
 

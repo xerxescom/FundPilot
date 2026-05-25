@@ -26,6 +26,8 @@
           <MetricCard label="当前评级" :value="status.rating || '暂无'" :hint="scoreText(status.latest_score)" />
           <MetricCard label="评分可信度" :value="confidenceText(score?.confidence_level)" :hint="scoreText(score?.confidence_score)" />
           <MetricCard label="窗口信号" :value="signalText(score?.buy_window_signal)" :hint="score?.buy_window_reason || '不构成投资建议'" />
+          <MetricCard label="市场环境" :value="marketText(score?.market_signal)" :hint="score?.market_reason" />
+          <MetricCard label="组合适配" :value="fitText(score?.portfolio_fit_level)" :hint="score?.portfolio_fit_reason" />
         </div>
         <el-steps class="section" :active="activeStep" finish-status="success" simple>
           <el-step v-for="step in status.steps" :key="step.key" :title="step.label" />
@@ -101,6 +103,8 @@
           <MetricCard label="评分" :value="scoreText(score?.total_score)" :hint="score?.rating" />
           <MetricCard label="可信度" :value="confidenceText(score?.confidence_level)" :hint="scoreText(score?.confidence_score)" />
           <MetricCard label="窗口信号" :value="signalText(score?.buy_window_signal)" :hint="score?.buy_window_reason" />
+          <MetricCard label="市场环境" :value="marketText(score?.market_signal)" :hint="score?.market_reason" />
+          <MetricCard label="组合适配" :value="fitText(score?.portfolio_fit_level)" :hint="score?.portfolio_fit_reason" />
         </div>
 
         <div class="section panel chart-panel">
@@ -296,6 +300,16 @@ function signalText(signal?: Score["buy_window_signal"] | null) {
     blocked: "不可操作",
   };
   return signal ? labels[signal] : "暂无";
+}
+
+function marketText(signal?: Score["market_signal"] | null) {
+  const labels = { supportive: "偏强", neutral: "中性", weak: "偏弱" };
+  return signal ? labels[signal] : "暂无";
+}
+
+function fitText(level?: Score["portfolio_fit_level"] | null) {
+  const labels = { high: "高", medium: "中", low: "低" };
+  return level ? labels[level] : "暂无";
 }
 
 async function runAction(action: Exclude<ActionLoading, null>, work: () => Promise<void>) {

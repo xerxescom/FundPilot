@@ -1,8 +1,15 @@
 from datetime import date
 from decimal import Decimal
 
-from app.db.models import FundInfo, FundIndicator, FundScore
-from app.services.score_service import available_strategies, score_indicator, score_indicator_with_strategy, top_scores, top_scores_by_strategy
+from app.db.models import FundInfo, FundIndicator, FundNav, FundScore, MarketIndexDaily, PortfolioPosition
+from app.services.score_service import (
+    available_strategies,
+    score_indicator,
+    score_indicator_with_strategy,
+    score_payload,
+    top_scores,
+    top_scores_by_strategy,
+)
 from app.services.watchlist_service import infer_industry
 
 
@@ -122,6 +129,83 @@ def test_score_indicator_high_return_deep_drawdown_not_favorable():
     result = score_indicator(indicator)
 
     assert result["buy_window_signal"] != "favorable"
+
+
+def test_score_payload_weak_market_downgrades_favorable_window(db_session):
+    today = date.today()
+    db_session.add_all(
+        [
+            FundInfo(
+                fund_code="000001",
+                fund_name="测试基金",
+                establish_date=date(2020, 1, 1),
+                fund_size=Decimal("30"),
+                buy_status="开放申购",
+            ),
+            FundIndicator(
+                fund_code="000001",
+                calc_date=today,
+                return_1m=Decimal("0.02"),
+                return_3m=Decimal("0.05"),
+                return_6m=Decimal("0.12"),
+                return_1y=Decimal("0.25"),
+                max_drawdown_1y=Decimal("-0.05"),
+                volatility_1y=Decimal("0.10"),
+                sharpe_1y=Decimal("1.30"),
+                win_rate_1y=Decimal("0.60"),
+            ),
+            FundScore(fund_code="000001", score_date=today, total_score=Decimal("92"), rating="重点关注"),
+            FundNav(fund_code="000001", nav_date=date(2025, 1, 1), unit_nav=Decimal("1.0")),
+            FundNav(fund_code="000001", nav_date=today, unit_nav=Decimal("1.3")),
+            MarketIndexDaily(index_code="sh000300", index_name="沪深300", trade_date=date(2026, 4, 1), close=Decimal("100")),
+            MarketIndexDaily(index_code="sh000300", index_name="沪深300", trade_date=today, close=Decimal("90")),
+        ]
+    )
+    db_session.commit()
+
+    payload = score_payload(db_session, "000001")
+
+    assert payload["market_signal"] == "weak"
+    assert payload["buy_window_signal"] != "favorable"
+    assert "market_weak" in payload["risk_flags"]
+
+
+def test_score_payload_portfolio_concentration_downgrades_window(db_session):
+    today = date.today()
+    db_session.add_all(
+        [
+            FundInfo(
+                fund_code="000001",
+                fund_name="测试基金",
+                establish_date=date(2020, 1, 1),
+                fund_size=Decimal("30"),
+                buy_status="开放申购",
+            ),
+            FundIndicator(
+                fund_code="000001",
+                calc_date=today,
+                return_1m=Decimal("0.02"),
+                return_3m=Decimal("0.05"),
+                return_6m=Decimal("0.12"),
+                return_1y=Decimal("0.25"),
+                max_drawdown_1y=Decimal("-0.05"),
+                volatility_1y=Decimal("0.10"),
+                sharpe_1y=Decimal("1.30"),
+                win_rate_1y=Decimal("0.60"),
+            ),
+            FundScore(fund_code="000001", score_date=today, total_score=Decimal("92"), rating="重点关注"),
+            FundNav(fund_code="000001", nav_date=date(2025, 1, 1), unit_nav=Decimal("1.0")),
+            FundNav(fund_code="000001", nav_date=today, unit_nav=Decimal("1.3")),
+            PortfolioPosition(fund_code="000001", holding_share=Decimal("1000"), holding_amount=Decimal("1000")),
+        ]
+    )
+    db_session.commit()
+
+    payload = score_payload(db_session, "000001")
+
+    assert payload["portfolio_fit_level"] == "low"
+    assert payload["buy_window_signal"] == "cautious"
+    assert "portfolio_concentration" in payload["risk_flags"]
 
 
 def test_top_scores_deduplicates_by_latest_fund_code(db_session):
