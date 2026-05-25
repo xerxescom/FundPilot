@@ -21,6 +21,7 @@
 </template>
 
 <script setup lang="ts">
+import type { EChartsOption } from "echarts";
 import { computed, onMounted, ref } from "vue";
 
 import { api } from "../api/fundpilot";
@@ -38,7 +39,7 @@ const filtered = computed(() =>
     (row) => (!ratings.value.length || ratings.value.includes(row.rating || "")) && Number(row.total_score || 0) >= minScore.value,
   ),
 );
-const barOption = computed(() => ({
+const barOption = computed<EChartsOption>(() => ({
   grid: { left: 110, right: 30, top: 20, bottom: 20 },
   xAxis: { type: "value", max: 100 },
   yAxis: { type: "category", data: filtered.value.slice(0, 20).map((row) => row.fund_code) },

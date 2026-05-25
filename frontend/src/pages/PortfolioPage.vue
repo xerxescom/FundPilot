@@ -63,6 +63,7 @@
 
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
+import type { EChartsOption } from "echarts";
 import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "../api/fundpilot";
@@ -87,7 +88,7 @@ const positionRows = computed(() =>
   })),
 );
 
-const pieOption = computed(() => ({
+const pieOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: "item" },
   series: [
     {

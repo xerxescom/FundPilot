@@ -30,6 +30,7 @@
 </template>
 
 <script setup lang="ts">
+import type { EChartsOption } from "echarts";
 import { computed, onMounted, ref } from "vue";
 
 import { api } from "../api/fundpilot";
@@ -43,11 +44,20 @@ const selected = ref<string[]>([]);
 const comparison = ref<Record<string, unknown> | null>(null);
 const industryRows = ref<Array<Record<string, unknown>>>([]);
 const fundRows = computed(() => (comparison.value?.funds as Array<Record<string, unknown>>) || []);
-const scatterOption = computed(() => ({
+const scatterOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: "item" },
   xAxis: { name: "最大回撤", type: "value" },
   yAxis: { name: "近1年收益", type: "value" },
-  series: [{ type: "scatter", data: fundRows.value.map((row) => [row.max_drawdown_1y, row.return_1y, row.fund_code]) }],
+  series: [
+    {
+      type: "scatter",
+      data: fundRows.value.map((row) => [
+        Number(row.max_drawdown_1y || 0),
+        Number(row.return_1y || 0),
+        String(row.fund_code || ""),
+      ]),
+    },
+  ],
 }));
 
 async function compare() {

@@ -13,6 +13,7 @@
 </template>
 
 <script setup lang="ts">
+import type { EChartsOption } from "echarts";
 import { computed, onMounted, ref, watch } from "vue";
 
 import { api } from "../api/fundpilot";
@@ -24,11 +25,11 @@ import FundSelector from "../components/FundSelector.vue";
 const watchlist = ref<WatchlistItem[]>([]);
 const selected = ref<string>();
 const rows = ref<Array<Record<string, unknown>>>([]);
-const lineOption = computed(() => ({
+const lineOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: "axis" },
-  xAxis: { type: "category", data: rows.value.map((row) => row.score_date) },
+  xAxis: { type: "category", data: rows.value.map((row) => String(row.score_date || "")) },
   yAxis: { type: "value", min: 0, max: 100 },
-  series: [{ name: "总分", type: "line", data: rows.value.map((row) => row.total_score) }],
+  series: [{ name: "总分", type: "line", data: rows.value.map((row) => Number(row.total_score || 0)) }],
 }));
 
 async function loadTrend() {

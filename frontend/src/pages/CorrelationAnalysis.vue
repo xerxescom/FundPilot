@@ -26,6 +26,7 @@
 
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
+import type { EChartsOption } from "echarts";
 import { computed, onMounted, ref } from "vue";
 
 import { api } from "../api/fundpilot";
@@ -46,13 +47,13 @@ const matrixRows = computed(() =>
     ...values,
   })),
 );
-const lineOption = computed(() => ({
+const lineOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: "axis" },
-  xAxis: { type: "category", data: returns.value.map((row) => row.nav_date) },
+  xAxis: { type: "category", data: returns.value.map((row) => String(row.nav_date || "")) },
   yAxis: { type: "value" },
   series: [
-    { name: fundA.value, type: "line", data: returns.value.map((row) => row.return_a) },
-    { name: fundB.value, type: "line", data: returns.value.map((row) => row.return_b) },
+    { name: fundA.value, type: "line", data: returns.value.map((row) => Number(row.return_a || 0)) },
+    { name: fundB.value, type: "line", data: returns.value.map((row) => Number(row.return_b || 0)) },
   ],
 }));
 

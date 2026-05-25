@@ -71,6 +71,7 @@
 
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
+import type { EChartsOption } from "echarts";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
@@ -115,7 +116,7 @@ const drawdown = computed(() => {
   });
 });
 
-const navOption = computed(() => ({
+const navOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: "axis" },
   legend: { top: 0 },
   grid: [

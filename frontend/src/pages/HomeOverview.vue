@@ -84,9 +84,18 @@ import MetricCard from "../components/MetricCard.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
 import ReportCard from "../components/ReportCard.vue";
 
+interface DashboardScore {
+  fund_code: string;
+  fund_name?: string | null;
+  total_score?: number | null;
+  rating?: string | null;
+  reason?: string | null;
+  score_date?: string | null;
+}
+
 interface DashboardData {
   watchlist_count: number;
-  top_scores: Array<Record<string, unknown>>;
+  top_scores: DashboardScore[];
   unread_alerts: Alert[];
   latest_report?: Report | null;
   market_context: MarketContext[];
@@ -98,7 +107,7 @@ const data = ref<DashboardData | null>(null);
 const health = computed(() => data.value?.data_health);
 const alerts = computed(() => data.value?.unread_alerts || []);
 const markets = computed(() => data.value?.market_context || []);
-const bestScore = computed(() => data.value?.top_scores?.[0]);
+const bestScore = computed<DashboardScore | undefined>(() => data.value?.top_scores?.[0]);
 const latestReportTime = computed(() => data.value?.latest_report?.created_at?.slice(0, 16) || "暂无");
 const problemRows = computed(() => (health.value?.funds || []).filter((item) => (item.issues as unknown[])?.length));
 
