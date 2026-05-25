@@ -31,10 +31,11 @@ def test_scheduler_config_can_be_enabled(monkeypatch):
 
 
 def test_task_descriptions_are_readable_chinese():
-    descriptions = {item["task_name"]: item["description"] for item in available_tasks()}
+    tasks = {item["task_name"]: item for item in available_tasks()}
 
-    assert descriptions["sync_watchlist_nav"] == "同步全部自选基金净值"
-    assert descriptions["generate_daily_report"] == "生成每日基金简报"
+    assert tasks["sync_watchlist_nav"]["description"] == "同步全部自选基金净值"
+    assert tasks["sync_watchlist_nav"]["priority"] == "P0"
+    assert tasks["generate_daily_report"]["description"] == "生成每日基金简报"
 
 
 def test_app_startup_with_scheduler_disabled_keeps_health_route(monkeypatch):

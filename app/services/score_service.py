@@ -71,30 +71,33 @@ def score_indicator(indicator: FundIndicator, fund: FundInfo | None = None) -> d
         reasons.append("年化波动率偏高")
     else:
         volatility_score = 3
-        reasons.append("年化波动率较高，需要控制仓位风险")
+        reasons.append("年化波动率较高，需要控制持仓风险")
 
     if win_rate is None:
         stability_score = 6
+        reasons.append("胜率数据不足，稳定性评分降级处理")
     elif win_rate >= 0.55:
         stability_score = 15
+        reasons.append("近1年上涨天数占比较高")
     elif win_rate >= 0.50:
         stability_score = 11
+        reasons.append("近1年胜率略高于均衡水平")
     elif win_rate >= 0.45:
         stability_score = 8
+        reasons.append("近1年胜率接近均衡水平")
     else:
         stability_score = 5
+        reasons.append("近1年胜率偏低")
 
     fund_size = float(fund.fund_size) if fund and fund.fund_size is not None else None
     size_score = 6 if fund_size is None else (10 if fund_size >= 10 else 5)
+    if fund_size is None:
+        reasons.append("基金规模数据缺失，规模评分采用中性分")
+    elif fund_size < 10:
+        reasons.append("基金规模偏小，流动性和稳定性需继续观察")
+
     trade_status_score = 5
-    total_score = (
-        return_score
-        + drawdown_score
-        + volatility_score
-        + stability_score
-        + size_score
-        + trade_status_score
-    )
+    total_score = return_score + drawdown_score + volatility_score + stability_score + size_score + trade_status_score
     rating = (
         "重点关注"
         if total_score >= 85

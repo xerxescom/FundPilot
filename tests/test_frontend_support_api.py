@@ -1,8 +1,8 @@
 from datetime import date
 from decimal import Decimal
 
-from app.api.v1.correlation import correlation_matrix, fund_return_series
 from app.api.v1.alert import update_alert
+from app.api.v1.correlation import correlation_matrix, fund_return_series
 from app.api.v1.dashboard import dashboard_overview, dashboard_today
 from app.api.v1.fund import get_analysis_status
 from app.api.v1.portfolio import portfolio_diagnosis

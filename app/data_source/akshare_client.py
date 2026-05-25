@@ -10,37 +10,39 @@ class AkshareFundDataSource(FundDataSource):
     source_name = "akshare"
 
     def get_fund_info(self, fund_code: str) -> dict:
+        fund_code = fund_code.zfill(6)
         try:
             import akshare as ak
 
             rows = ak.fund_name_em()
             code_col = self._pick_column(rows, ["基金代码", "fund_code", "代码"])
             name_col = self._pick_column(rows, ["基金简称", "基金名称", "name"])
-            type_col = self._pick_column(rows, ["基金类型", "类型"])
-            match = rows[rows[code_col].astype(str).str.zfill(6) == fund_code.zfill(6)]
+            type_col = self._pick_optional_column(rows, ["基金类型", "类型"])
+            match = rows[rows[code_col].astype(str).str.zfill(6) == fund_code]
             if match.empty:
                 raise ValueError(f"Fund code not found: {fund_code}")
             row = match.iloc[0]
             return {
-                "fund_code": fund_code.zfill(6),
+                "fund_code": fund_code,
                 "fund_name": str(row.get(name_col, fund_code)),
-                "fund_type": str(row.get(type_col, "")) or None,
+                "fund_type": str(row.get(type_col, "")) if type_col else None,
                 "source": self.source_name,
             }
         except Exception as exc:
             logger.warning("Failed to fetch fund info for {}: {}", fund_code, exc)
             return {
-                "fund_code": fund_code.zfill(6),
-                "fund_name": fund_code.zfill(6),
+                "fund_code": fund_code,
+                "fund_name": fund_code,
                 "fund_type": None,
                 "source": self.source_name,
             }
 
     def get_fund_nav_history(self, fund_code: str) -> pd.DataFrame:
+        fund_code = fund_code.zfill(6)
         try:
             import akshare as ak
 
-            raw = ak.fund_open_fund_info_em(symbol=fund_code.zfill(6), indicator="单位净值走势")
+            raw = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
         except Exception as exc:
             logger.error("Failed to fetch NAV history for {}: {}", fund_code, exc)
             raise ValueError(f"Failed to fetch NAV history for {fund_code}") from exc
@@ -55,7 +57,7 @@ class AkshareFundDataSource(FundDataSource):
 
         df = pd.DataFrame(
             {
-                "fund_code": fund_code.zfill(6),
+                "fund_code": fund_code,
                 "nav_date": pd.to_datetime(raw[date_col], errors="coerce").dt.date,
                 "unit_nav": pd.to_numeric(raw[unit_col], errors="coerce"),
                 "accumulated_nav": pd.to_numeric(raw[acc_col], errors="coerce") if acc_col else None,
@@ -120,6 +122,7 @@ class AkshareFundDataSource(FundDataSource):
     def _normalize_return(series: pd.Series) -> pd.Series:
         values = series.astype(str).str.replace("%", "", regex=False)
         numeric = pd.to_numeric(values, errors="coerce")
-        if numeric.abs().max(skipna=True) and numeric.abs().max(skipna=True) > 1:
+        max_abs = numeric.abs().max(skipna=True)
+        if pd.notna(max_abs) and max_abs > 1:
             numeric = numeric / 100
         return numeric

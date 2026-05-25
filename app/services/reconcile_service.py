@@ -53,9 +53,7 @@ def reconcile_fund_nav(fund_code: str, limit: int = 120) -> dict:
     merged = left.merge(right, on="nav_date", how="outer").sort_values("nav_date", ascending=False)
     merged = merged.head(limit).copy()
     merged["unit_nav_diff"] = (merged["akshare_unit_nav"] - merged["eastmoney_unit_nav"]).abs()
-    merged["daily_return_diff"] = (
-        merged["akshare_daily_return"] - merged["eastmoney_daily_return"]
-    ).abs()
+    merged["daily_return_diff"] = (merged["akshare_daily_return"] - merged["eastmoney_daily_return"]).abs()
 
     ak_missing = int(merged["akshare_unit_nav"].isna().sum())
     em_missing = int(merged["eastmoney_unit_nav"].isna().sum())

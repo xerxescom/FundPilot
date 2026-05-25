@@ -63,13 +63,21 @@ def analysis_status(db: Session, fund_code: str) -> dict:
 def analyze_fund(db: Session, fund_code: str) -> dict:
     fund_code = fund_code.zfill(6)
     result: dict[str, object] = {"fund_code": fund_code, "steps": []}
-    synced_rows = nav_service.sync_fund_nav(db, fund_code)
-    result["steps"].append({"key": "sync_nav", "label": "同步净值", "status": "success", "result": synced_rows})
+    sync_detail = nav_service.sync_fund_nav_detailed(db, fund_code)
+    result["steps"].append(
+        {
+            "key": "sync_nav",
+            "label": "同步净值",
+            "status": "success",
+            "result": f"{sync_detail['synced_rows']} rows via {sync_detail['source']}",
+        }
+    )
     indicator = indicator_service.calculate_and_save_indicators(db, fund_code)
     result["steps"].append({"key": "calc_indicator", "label": "计算指标", "status": "success", "result": indicator.calc_date})
     score = score_service.calculate_and_save_score(db, fund_code)
     result["steps"].append({"key": "calc_score", "label": "计算评分", "status": "success", "result": score.total_score})
     report = generate_fund_explanation(db, fund_code)
     result["steps"].append({"key": "fund_report", "label": "生成基金解释", "status": "success", "result": report.id})
+    result["sync_diagnostics"] = sync_detail
     result["status"] = analysis_status(db, fund_code)
     return result
