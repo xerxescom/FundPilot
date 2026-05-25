@@ -31,8 +31,9 @@
           <template #default="{ row }">{{ scoreText(row.analysis_status?.latest_score) }}</template>
         </el-table-column>
         <el-table-column prop="note" label="备注" />
-        <el-table-column label="操作" width="220">
+        <el-table-column label="操作" width="280">
           <template #default="{ row }">
+            <el-button link type="primary" @click="goDetail(row.fund_code)">详情</el-button>
             <el-button link type="primary" :disabled="Boolean(syncing)" @click="analyze(row.fund_code)">一键分析</el-button>
             <el-button link type="danger" :disabled="Boolean(syncing)" @click="remove(row.fund_code)">移除</el-button>
           </template>
@@ -58,6 +59,7 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 
 import { api } from "../api/fundpilot";
 import { scoreText } from "../api/format";
@@ -67,6 +69,7 @@ import TaskResultTable from "../components/TaskResultTable.vue";
 type WatchlistRow = WatchlistItem & { analysis_status?: AnalysisStatus };
 
 const loading = ref(false);
+const router = useRouter();
 const rows = ref<WatchlistRow[]>([]);
 const syncCode = ref("");
 const syncing = ref<false | "one" | "all" | "analyze">(false);
@@ -111,6 +114,10 @@ async function remove(code: string) {
   await api.removeWatchlist(code);
   ElMessage.success("已移除");
   await load();
+}
+
+function goDetail(code: string) {
+  router.push(`/funds/${code}`);
 }
 
 async function analyze(code: string) {

@@ -68,15 +68,30 @@
         <div class="section panel">
           <h2 class="section-title">净值明细</h2>
           <el-skeleton v-if="loading" :rows="6" animated />
-          <el-table v-else :data="navRows" border stripe>
-            <el-table-column prop="nav_date" label="日期" />
-            <el-table-column prop="unit_nav" label="单位净值" />
-            <el-table-column prop="accumulated_nav" label="累计净值" />
-            <el-table-column label="日涨跌幅">
+          <el-table
+            v-else
+            :data="pagedNavRows"
+            border
+            stripe
+            :default-sort="{ prop: 'nav_date', order: 'descending' }"
+            @sort-change="handleNavSort"
+          >
+            <el-table-column prop="nav_date" label="日期" sortable="custom" />
+            <el-table-column prop="unit_nav" label="单位净值" sortable="custom" />
+            <el-table-column prop="accumulated_nav" label="累计净值" sortable="custom" />
+            <el-table-column prop="daily_return" label="日涨跌幅" sortable="custom">
               <template #default="{ row }">{{ pct(row.daily_return) }}</template>
             </el-table-column>
             <el-table-column prop="source" label="来源" />
           </el-table>
+          <el-pagination
+            class="table-pagination"
+            layout="total, sizes, prev, pager, next"
+            :total="sortedNavRows.length"
+            :page-sizes="[10, 20, 50, 100]"
+            v-model:current-page="navPage"
+            v-model:page-size="navPageSize"
+          />
         </div>
       </template>
     </div>
@@ -110,6 +125,12 @@ const loading = ref(false);
 const hasLoadedOnce = ref(false);
 const actionLoading = ref<ActionLoading>(null);
 const navRows = ref<FundNav[]>([]);
+const navPage = ref(1);
+const navPageSize = ref(20);
+const navSort = ref<{ prop: keyof FundNav; order: "ascending" | "descending" }>({
+  prop: "nav_date",
+  order: "descending",
+});
 const indicator = ref<Indicator | null>(null);
 const score = ref<Score | null>(null);
 const status = ref<AnalysisStatus | null>(null);
@@ -132,6 +153,29 @@ const drawdown = computed(() => {
     peak = Math.max(peak, value);
     return peak ? value / peak - 1 : 0;
   });
+});
+
+const sortedNavRows = computed(() => {
+  const { prop, order } = navSort.value;
+  return [...navRows.value].sort((left, right) => {
+    const leftValue = left[prop];
+    const rightValue = right[prop];
+    if (leftValue === rightValue) return 0;
+    if (leftValue === null || leftValue === undefined) return 1;
+    if (rightValue === null || rightValue === undefined) return -1;
+    const leftNumber = Number(leftValue);
+    const rightNumber = Number(rightValue);
+    const result =
+      Number.isNaN(leftNumber) || Number.isNaN(rightNumber)
+        ? String(leftValue).localeCompare(String(rightValue))
+        : leftNumber - rightNumber;
+    return order === "ascending" ? result : -result;
+  });
+});
+
+const pagedNavRows = computed(() => {
+  const start = (navPage.value - 1) * navPageSize.value;
+  return sortedNavRows.value.slice(start, start + navPageSize.value);
 });
 
 const navOption = computed<EChartsOption>(() => ({
@@ -166,12 +210,18 @@ async function loadFund() {
   try {
     status.value = (await api.analysisStatus(fundCode.value).catch(() => null)) as AnalysisStatus | null;
     navRows.value = await api.nav(fundCode.value);
+    navPage.value = 1;
     indicator.value = await api.indicators(fundCode.value).catch(() => null);
     score.value = await api.score(fundCode.value).catch(() => null);
     hasLoadedOnce.value = true;
   } finally {
     loading.value = false;
   }
+}
+
+function handleNavSort({ prop, order }: { prop: keyof FundNav; order: "ascending" | "descending" | null }) {
+  navSort.value = { prop: prop || "nav_date", order: order || "descending" };
+  navPage.value = 1;
 }
 
 async function runAction(action: Exclude<ActionLoading, null>, work: () => Promise<void>) {
@@ -239,5 +289,10 @@ watch(fundCode, loadFund);
 
 .chart-panel :deep(.chart) {
   height: 440px;
+}
+
+.table-pagination {
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 </style>
