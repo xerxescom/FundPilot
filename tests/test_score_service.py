@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.db.models import FundIndicator, FundScore
-from app.services.score_service import score_indicator, top_scores
+from app.services.score_service import available_strategies, score_indicator, score_indicator_with_strategy, top_scores, top_scores_by_strategy
 from app.services.watchlist_service import infer_industry
 
 
@@ -69,3 +69,57 @@ def test_infer_industry_from_fund_name_and_type():
     assert infer_industry("易方达沪深300ETF联接", "指数型") == "宽基"
     assert infer_industry("广发纳斯达克100QDII", None) == "海外/QDII"
     assert infer_industry("某某纯债债券", None) == "债券"
+
+
+def test_score_strategies_are_available():
+    strategies = available_strategies()
+
+    assert {item["key"] for item in strategies} >= {"default", "steady", "growth", "low_drawdown"}
+
+
+def test_score_indicator_with_strategy_changes_context():
+    indicator = FundIndicator(
+        fund_code="000001",
+        calc_date=date.today(),
+        return_1y=Decimal("0.30"),
+        max_drawdown_1y=Decimal("-0.25"),
+        volatility_1y=Decimal("0.32"),
+        win_rate_1y=Decimal("0.52"),
+    )
+
+    growth = score_indicator_with_strategy(indicator, strategy="growth")
+    steady = score_indicator_with_strategy(indicator, strategy="steady")
+
+    assert growth["strategy_name"] == "进攻型"
+    assert steady["strategy_name"] == "稳健型"
+    assert growth["total_score"] > steady["total_score"]
+
+
+def test_top_scores_by_strategy_uses_latest_indicators(db_session):
+    db_session.add_all(
+        [
+            FundIndicator(
+                fund_code="000001",
+                calc_date=date(2026, 1, 1),
+                return_1y=Decimal("0.30"),
+                max_drawdown_1y=Decimal("-0.25"),
+                volatility_1y=Decimal("0.32"),
+                win_rate_1y=Decimal("0.52"),
+            ),
+            FundIndicator(
+                fund_code="000002",
+                calc_date=date(2026, 1, 1),
+                return_1y=Decimal("0.04"),
+                max_drawdown_1y=Decimal("-0.06"),
+                volatility_1y=Decimal("0.10"),
+                win_rate_1y=Decimal("0.58"),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    growth = top_scores_by_strategy(db_session, strategy="growth")
+    steady = top_scores_by_strategy(db_session, strategy="steady")
+
+    assert growth[0]["fund_code"] == "000001"
+    assert steady[0]["fund_code"] == "000002"

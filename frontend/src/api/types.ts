@@ -13,6 +13,7 @@ export interface WatchlistItem {
 
 export interface Score {
   fund_code: string;
+  fund_name?: Nullable<string>;
   score_date?: Nullable<string>;
   total_score?: Nullable<number>;
   return_score?: Nullable<number>;
@@ -23,6 +24,15 @@ export interface Score {
   trade_status_score?: Nullable<number>;
   rating?: Nullable<string>;
   reason?: Nullable<string>;
+  strategy?: Nullable<string>;
+  strategy_name?: Nullable<string>;
+  strategy_scenario?: Nullable<string>;
+}
+
+export interface ScoreStrategy {
+  key: string;
+  name: string;
+  scenario: string;
 }
 
 export interface Alert {

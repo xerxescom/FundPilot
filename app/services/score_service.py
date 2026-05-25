@@ -2,12 +2,63 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import FundInfo, FundIndicator, FundScore, Watchlist
 from app.services.indicator_service import latest_indicator
 from app.services.nav_service import decimal_or_none
+
+SCORE_STRATEGIES = {
+    "default": {
+        "name": "默认策略",
+        "scenario": "综合观察收益、回撤、波动、稳定性和规模，适合日常基金池排序。",
+        "weights": {
+            "return_score": 1.0,
+            "drawdown_score": 1.0,
+            "volatility_score": 1.0,
+            "stability_score": 1.0,
+            "size_score": 1.0,
+            "trade_status_score": 1.0,
+        },
+    },
+    "steady": {
+        "name": "稳健型",
+        "scenario": "优先观察回撤、波动和胜率，适合低波动持有体验筛选。",
+        "weights": {
+            "return_score": 0.75,
+            "drawdown_score": 1.45,
+            "volatility_score": 1.35,
+            "stability_score": 1.2,
+            "size_score": 1.0,
+            "trade_status_score": 1.0,
+        },
+    },
+    "growth": {
+        "name": "进攻型",
+        "scenario": "更关注收益弹性，同时保留基础风险约束，适合进攻观察池排序。",
+        "weights": {
+            "return_score": 1.55,
+            "drawdown_score": 0.75,
+            "volatility_score": 0.7,
+            "stability_score": 0.9,
+            "size_score": 0.8,
+            "trade_status_score": 1.0,
+        },
+    },
+    "low_drawdown": {
+        "name": "低回撤型",
+        "scenario": "重点压低回撤和波动，适合防守观察和组合稳定器筛选。",
+        "weights": {
+            "return_score": 0.6,
+            "drawdown_score": 1.8,
+            "volatility_score": 1.45,
+            "stability_score": 1.05,
+            "size_score": 0.9,
+            "trade_status_score": 1.0,
+        },
+    },
+}
 
 
 def _value(value: Decimal | None) -> float | None:
@@ -120,6 +171,59 @@ def score_indicator(indicator: FundIndicator, fund: FundInfo | None = None) -> d
     }
 
 
+def available_strategies() -> list[dict[str, str]]:
+    return [
+        {"key": key, "name": config["name"], "scenario": config["scenario"]}
+        for key, config in SCORE_STRATEGIES.items()
+    ]
+
+
+def _rating(total_score: float) -> str:
+    return (
+        "重点关注"
+        if total_score >= 85
+        else "可以观察"
+        if total_score >= 70
+        else "一般"
+        if total_score >= 60
+        else "暂不关注"
+    )
+
+
+def score_indicator_with_strategy(
+    indicator: FundIndicator,
+    fund: FundInfo | None = None,
+    strategy: str = "default",
+) -> dict:
+    if strategy not in SCORE_STRATEGIES:
+        raise ValueError(f"Unknown score strategy: {strategy}")
+    base = score_indicator(indicator, fund)
+    weights = SCORE_STRATEGIES[strategy]["weights"]
+    weighted_total = sum(float(base[field]) * float(weight) for field, weight in weights.items())
+    max_weighted_total = sum(
+        max_score * float(weights[field])
+        for field, max_score in {
+            "return_score": 30,
+            "drawdown_score": 25,
+            "volatility_score": 15,
+            "stability_score": 15,
+            "size_score": 10,
+            "trade_status_score": 5,
+        }.items()
+    )
+    total_score = round(weighted_total / max_weighted_total * 100, 2) if max_weighted_total else 0
+    strategy_name = SCORE_STRATEGIES[strategy]["name"]
+    return {
+        **base,
+        "strategy": strategy,
+        "strategy_name": strategy_name,
+        "strategy_scenario": SCORE_STRATEGIES[strategy]["scenario"],
+        "total_score": total_score,
+        "rating": _rating(total_score),
+        "reason": f"{strategy_name}：{base['reason']}",
+    }
+
+
 def calculate_and_save_score(db: Session, fund_code: str) -> FundScore:
     fund_code = fund_code.zfill(6)
     indicator = latest_indicator(db, fund_code)
@@ -179,8 +283,6 @@ def calculate_watchlist_scores(db: Session) -> dict[str, str]:
 
 def top_scores(db: Session, limit: int = 20) -> list[FundScore]:
     """Return each fund's latest score, ordered by total score descending."""
-    from sqlalchemy import func
-
     latest_date_sq = (
         select(
             FundScore.fund_code,
@@ -202,3 +304,65 @@ def top_scores(db: Session, limit: int = 20) -> list[FundScore]:
             .limit(limit)
         )
     )
+
+
+def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 20) -> list[dict]:
+    if strategy == "default":
+        fund_names = {
+            item.fund_code: item.fund_name
+            for item in db.scalars(select(FundInfo).where(FundInfo.fund_name.is_not(None))).all()
+        }
+        return [
+            {
+                "fund_code": item.fund_code,
+                "fund_name": fund_names.get(item.fund_code),
+                "score_date": item.score_date,
+                "total_score": float(item.total_score) if item.total_score is not None else None,
+                "return_score": float(item.return_score) if item.return_score is not None else None,
+                "drawdown_score": float(item.drawdown_score) if item.drawdown_score is not None else None,
+                "volatility_score": float(item.volatility_score) if item.volatility_score is not None else None,
+                "stability_score": float(item.stability_score) if item.stability_score is not None else None,
+                "size_score": float(item.size_score) if item.size_score is not None else None,
+                "trade_status_score": float(item.trade_status_score) if item.trade_status_score is not None else None,
+                "rating": item.rating,
+                "reason": item.reason,
+                "strategy": "default",
+                "strategy_name": SCORE_STRATEGIES["default"]["name"],
+                "strategy_scenario": SCORE_STRATEGIES["default"]["scenario"],
+            }
+            for item in top_scores(db, limit)
+        ]
+
+    if strategy not in SCORE_STRATEGIES:
+        raise ValueError(f"Unknown score strategy: {strategy}")
+
+    latest_indicator_sq = (
+        select(
+            FundIndicator.fund_code,
+            func.max(FundIndicator.calc_date).label("latest_date"),
+        )
+        .group_by(FundIndicator.fund_code)
+        .subquery()
+    )
+    rows = db.execute(
+        select(FundIndicator, FundInfo)
+        .join(
+            latest_indicator_sq,
+            (FundIndicator.fund_code == latest_indicator_sq.c.fund_code)
+            & (FundIndicator.calc_date == latest_indicator_sq.c.latest_date),
+        )
+        .outerjoin(FundInfo, FundInfo.fund_code == FundIndicator.fund_code)
+    ).all()
+
+    scored = []
+    for indicator, fund in rows:
+        item = score_indicator_with_strategy(indicator, fund, strategy)
+        scored.append(
+            {
+                "fund_code": indicator.fund_code,
+                "fund_name": fund.fund_name if fund else None,
+                "score_date": indicator.calc_date,
+                **item,
+            }
+        )
+    return sorted(scored, key=lambda item: item["total_score"] or 0, reverse=True)[:limit]

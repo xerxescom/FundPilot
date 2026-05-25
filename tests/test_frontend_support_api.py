@@ -8,6 +8,7 @@ from app.api.v1 import fund as fund_api
 from app.api.v1.fund import get_analysis_status
 from app.api.v1.portfolio import portfolio_diagnosis
 from app.api.v1.report import ollama_status
+from app.api.v1.score import score_strategies, top_scores_by_strategy
 from app.api.v1.research import industry_overview, risk_return_points
 from app.db.models import AlertEvent, FundIndicator, FundNav, FundScore, PortfolioPosition, Watchlist
 from app.schemas.alert import AlertUpdate
@@ -165,3 +166,23 @@ def test_alert_status_update_api_contract(db_session):
 
     assert updated.status == "handled"
     assert updated.is_read is True
+
+
+def test_score_strategy_api_contract(db_session):
+    db_session.add(
+        FundIndicator(
+            fund_code="000001",
+            calc_date=date(2026, 5, 24),
+            return_1y=Decimal("0.20"),
+            max_drawdown_1y=Decimal("-0.08"),
+            volatility_1y=Decimal("0.12"),
+            win_rate_1y=Decimal("0.56"),
+        )
+    )
+    db_session.commit()
+
+    strategies = score_strategies()
+    rows = top_scores_by_strategy("steady", limit=100, db=db_session)
+
+    assert strategies[0]["name"] == "默认策略"
+    assert rows[0]["strategy_name"] == "稳健型"
