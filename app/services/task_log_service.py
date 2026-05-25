@@ -9,6 +9,14 @@ from app.db.models import TaskRunLog
 T = TypeVar("T")
 
 
+def _is_failed_result(value: object) -> bool:
+    if isinstance(value, str):
+        return value.startswith("failed:")
+    if isinstance(value, dict):
+        return value.get("status") == "failed"
+    return False
+
+
 def record_task_log(
     db: Session,
     task_name: str,
@@ -47,11 +55,7 @@ def run_logged(db: Session, task_name: str, fn: Callable[[], T]) -> T:
         raise
 
     success_count = len(result) if isinstance(result, (list, dict)) else None
-    failure_count = (
-        sum(1 for value in result.values() if isinstance(value, str) and value.startswith("failed:"))
-        if isinstance(result, dict)
-        else 0
-    )
+    failure_count = sum(1 for value in result.values() if _is_failed_result(value)) if isinstance(result, dict) else 0
     record_task_log(
         db,
         task_name=task_name,

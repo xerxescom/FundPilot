@@ -44,6 +44,14 @@ def _latest_sync_status(db: Session, fund_code: str) -> tuple[str | None, str | 
             continue
         if isinstance(data, dict) and fund_code in data:
             value = data[fund_code]
+            if isinstance(value, dict):
+                status = value.get("status")
+                if status == "failed":
+                    quality = value.get("quality")
+                    issues = quality.get("issues", []) if isinstance(quality, dict) else []
+                    reason = "；".join(str(issue) for issue in issues) if issues else None
+                    return "failed", reason, log.created_at.date()
+                return "success", None, log.created_at.date()
             if isinstance(value, str) and value.startswith("failed:"):
                 return "failed", value.removeprefix("failed:").strip(), log.created_at.date()
             return "success", None, log.created_at.date()

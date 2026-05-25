@@ -167,15 +167,28 @@ def sync_fund_nav(db: Session, fund_code: str) -> int:
     return int(sync_fund_nav_detailed(db, fund_code)["synced_rows"])
 
 
-def sync_watchlist_nav(db: Session) -> dict[str, int | str]:
-    result: dict[str, int | str] = {}
+def sync_watchlist_nav(db: Session) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
     funds = db.scalars(select(Watchlist).where(Watchlist.is_active.is_(True))).all()
     for item in funds:
         try:
             detail = sync_fund_nav_detailed(db, item.fund_code)
-            result[item.fund_code] = f"{detail['synced_rows']} rows via {detail['source']}"
+            result[item.fund_code] = {"status": "success", **detail}
         except Exception as exc:
-            result[item.fund_code] = f"failed: {exc}"
+            result[item.fund_code] = {
+                "fund_code": item.fund_code.zfill(6),
+                "status": "failed",
+                "synced_rows": 0,
+                "source": None,
+                "attempts": [],
+                "quality": {
+                    "valid": False,
+                    "issues": [str(exc)],
+                    "row_count": 0,
+                    "duplicate_count": 0,
+                    "missing_daily_return_count": 0,
+                },
+            }
     return result
 
 

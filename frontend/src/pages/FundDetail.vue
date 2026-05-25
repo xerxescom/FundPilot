@@ -257,8 +257,10 @@ function handleNavSort({ prop, order }: { prop: keyof FundNav; order: "ascending
 function syncStatusText(statusText: string) {
   const labels: Record<string, string> = {
     success: "成功",
+    invalid: "数据质量异常",
     invalid_data: "数据质量异常",
     error: "失败",
+    failed: "失败",
   };
   return labels[statusText] || statusText;
 }

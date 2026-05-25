@@ -69,7 +69,7 @@ def analyze_fund(db: Session, fund_code: str) -> dict:
             "key": "sync_nav",
             "label": "同步净值",
             "status": "success",
-            "result": f"{sync_detail['synced_rows']} rows via {sync_detail['source']}",
+            "result": f"{sync_detail['synced_rows']} 行，数据源：{sync_detail['source']}",
         }
     )
     indicator = indicator_service.calculate_and_save_indicators(db, fund_code)
