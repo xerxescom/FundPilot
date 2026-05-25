@@ -239,6 +239,7 @@ logs/
 # Local environment variants
 .env.*
 !.env.example
+!.env.docker.example
 
 # Local generated exports and screenshots
 exports/

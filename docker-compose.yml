@@ -3,30 +3,42 @@ services:
     image: postgres:16
     container_name: fundpilot_postgres
     environment:
-      POSTGRES_DB: fund_watcher
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${DOCKER_POSTGRES_DB:-fund_watcher}
+      POSTGRES_USER: ${DOCKER_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${DOCKER_POSTGRES_PASSWORD:-postgres}
     ports:
-      - "5432:5432"
+      - "${DOCKER_POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d fund_watcher"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   backend:
     build: .
-    command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port $${BACKEND_PORT:-8000}"
+    command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
-      - "${BACKEND_PORT:-8000}:${BACKEND_PORT:-8000}"
-    env_file:
-      - .env
+      - "${DOCKER_BACKEND_PORT:-8000}:8000"
+    environment:
+      APP_NAME: FundPilot
+      APP_ENV: docker
+      BACKEND_PORT: 8000
+      DATABASE_URL: postgresql+psycopg2://${DOCKER_POSTGRES_USER:-postgres}:${DOCKER_POSTGRES_PASSWORD:-postgres}@postgres:5432/${DOCKER_POSTGRES_DB:-fund_watcher}
+      SYNC_NAV_CRON: ${DOCKER_SYNC_NAV_CRON:-18:00}
+      ENABLE_SCHEDULER: ${DOCKER_ENABLE_SCHEDULER:-false}
+      AUTO_CREATE_TABLES: ${DOCKER_AUTO_CREATE_TABLES:-true}
+      AI_PROVIDER: ${DOCKER_AI_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${DOCKER_OLLAMA_MODEL:-qwen3:14b}
+      OLLAMA_TIMEOUT: ${DOCKER_OLLAMA_TIMEOUT:-180}
+      ONLINE_LLM_API_KEY: ${DOCKER_ONLINE_LLM_API_KEY:-}
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:' + __import__('os').environ.get('BACKEND_PORT', '8000') + '/health', timeout=3)\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -34,15 +46,17 @@ services:
   frontend:
     image: node:20-alpine
     working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port $${FRONTEND_PORT:-5173}"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
-      - "${FRONTEND_PORT:-5173}:${FRONTEND_PORT:-5173}"
+      - "${DOCKER_FRONTEND_PORT:-5173}:5173"
     volumes:
       - ./frontend:/app
     environment:
-      FRONTEND_PORT: ${FRONTEND_PORT:-5173}
+      FRONTEND_PORT: 5173
+      VITE_API_PROXY_TARGET: http://backend:8000
 
 volumes:
   postgres_data:
