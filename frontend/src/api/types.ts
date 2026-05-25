@@ -62,6 +62,45 @@ export interface AnalysisStatus {
   complete: boolean;
 }
 
+export interface SyncAttempt {
+  source: string;
+  attempt: number;
+  status: string;
+  row_count: number;
+  issues: string[];
+}
+
+export interface NavQuality {
+  valid: boolean;
+  issues: string[];
+  row_count: number;
+  duplicate_count: number;
+  missing_daily_return_count: number;
+}
+
+export interface SyncDiagnostics {
+  fund_code: string;
+  synced_rows: number;
+  source: string;
+  attempts: SyncAttempt[];
+  quality: NavQuality;
+  status?: string;
+}
+
+export interface AnalyzeWorkflowStep {
+  key: string;
+  label: string;
+  status: string;
+  result: unknown;
+}
+
+export interface AnalyzeResult {
+  fund_code: string;
+  steps: AnalyzeWorkflowStep[];
+  sync_diagnostics?: SyncDiagnostics;
+  status?: AnalysisStatus;
+}
+
 export interface DashboardTodo {
   key: string;
   title: string;

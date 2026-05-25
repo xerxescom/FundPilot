@@ -1,6 +1,7 @@
 import { deleteJson, getJson, patchJson, postJson, putJson } from "./client";
 import type {
   Alert,
+  AnalyzeResult,
   DataHealth,
   FundNav,
   Indicator,
@@ -8,6 +9,7 @@ import type {
   PortfolioOverview,
   Report,
   Score,
+  SyncDiagnostics,
   WatchlistItem,
 } from "./types";
 
@@ -18,8 +20,8 @@ export const api = {
   addWatchlist: (data: Record<string, unknown>) => postJson<WatchlistItem>("/watchlist", data),
   removeWatchlist: (code: string) => deleteJson(`/watchlist/${code}`),
   syncWatchlistNav: () => postJson<Record<string, string | number>>("/watchlist/sync-nav"),
-  syncFundNav: (code: string) => postJson<{ fund_code: string; synced_rows: number }>(`/funds/${code}/sync-nav`),
-  analyzeFund: (code: string) => postJson<unknown>(`/funds/${code}/analyze`),
+  syncFundNav: (code: string) => postJson<SyncDiagnostics>(`/funds/${code}/sync-nav`),
+  analyzeFund: (code: string) => postJson<AnalyzeResult>(`/funds/${code}/analyze`),
   analysisStatus: (code: string) => getJson<unknown>(`/funds/${code}/analysis-status`),
   nav: (code: string) => getJson<FundNav[]>(`/funds/${code}/nav`),
   calcIndicators: (code: string) => postJson<Indicator>(`/funds/${code}/calc-indicators`),

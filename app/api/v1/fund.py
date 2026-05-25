@@ -36,14 +36,14 @@ def get_nav(fund_code: str, db: Session = Depends(get_db)):
 
 @router.post("/{fund_code}/sync-nav")
 def sync_nav(fund_code: str, db: Session = Depends(get_db)):
-    count = nav_service.sync_fund_nav(db, fund_code)
-    return {"fund_code": fund_code.zfill(6), "synced_rows": count}
+    return nav_service.sync_fund_nav_detailed(db, fund_code)
 
 
 @router.post("/{fund_code}/retry-sync")
 def retry_sync_nav(fund_code: str, db: Session = Depends(get_db)):
-    count = nav_service.sync_fund_nav(db, fund_code)
-    return {"fund_code": fund_code.zfill(6), "synced_rows": count, "status": "success"}
+    result = nav_service.sync_fund_nav_detailed(db, fund_code)
+    result["status"] = "success"
+    return result
 
 
 @router.get("/{fund_code}/analysis-status")

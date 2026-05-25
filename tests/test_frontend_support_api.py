@@ -4,6 +4,7 @@ from decimal import Decimal
 from app.api.v1.alert import update_alert
 from app.api.v1.correlation import correlation_matrix, fund_return_series
 from app.api.v1.dashboard import dashboard_overview, dashboard_today
+from app.api.v1 import fund as fund_api
 from app.api.v1.fund import get_analysis_status
 from app.api.v1.portfolio import portfolio_diagnosis
 from app.api.v1.report import ollama_status
@@ -112,6 +113,26 @@ def test_analysis_status_api_contract(db_session):
     assert payload["status"] == "score_ready"
     assert payload["steps"][0]["done"] is True
     assert payload["rating"] == "稳健观察"
+
+
+def test_sync_nav_api_returns_diagnostics(monkeypatch, db_session):
+    def fake_sync_fund_nav_detailed(db, fund_code):
+        assert db is db_session
+        return {
+            "fund_code": fund_code.zfill(6),
+            "synced_rows": 3,
+            "source": "akshare",
+            "attempts": [{"source": "akshare", "attempt": 1, "status": "success", "row_count": 3, "issues": []}],
+            "quality": {"valid": True, "issues": [], "row_count": 3, "duplicate_count": 0, "missing_daily_return_count": 0},
+        }
+
+    monkeypatch.setattr(fund_api.nav_service, "sync_fund_nav_detailed", fake_sync_fund_nav_detailed)
+
+    payload = fund_api.sync_nav("1", db_session)
+
+    assert payload["fund_code"] == "000001"
+    assert payload["source"] == "akshare"
+    assert payload["quality"]["valid"] is True
 
 
 def test_portfolio_diagnosis_api_contract(db_session):

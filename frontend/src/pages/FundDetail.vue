@@ -51,7 +51,36 @@
         </el-button>
       </div>
 
-      <template v-else>
+      <div v-if="syncDiagnostics" class="section panel">
+        <h2 class="section-title">同步诊断</h2>
+        <div class="metric-grid">
+          <MetricCard label="使用数据源" :value="syncDiagnostics.source" />
+          <MetricCard label="同步行数" :value="syncDiagnostics.synced_rows" />
+          <MetricCard label="重复日期" :value="syncDiagnostics.quality.duplicate_count" />
+          <MetricCard label="缺失日涨跌幅" :value="syncDiagnostics.quality.missing_daily_return_count" />
+        </div>
+        <el-alert
+          v-if="syncDiagnostics.quality.issues.length"
+          class="section"
+          type="warning"
+          :closable="false"
+          title="数据质量提示"
+          :description="syncDiagnostics.quality.issues.join('；')"
+        />
+        <el-table class="section" :data="syncDiagnostics.attempts" border stripe>
+          <el-table-column prop="source" label="数据源" min-width="120" />
+          <el-table-column prop="attempt" label="重试次数" width="100" />
+          <el-table-column prop="status" label="状态" min-width="120">
+            <template #default="{ row }">{{ syncStatusText(row.status) }}</template>
+          </el-table-column>
+          <el-table-column prop="row_count" label="返回行数" width="110" />
+          <el-table-column label="问题说明" min-width="220">
+            <template #default="{ row }">{{ row.issues?.length ? row.issues.join("；") : "无" }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <template v-if="!needsFullAnalysis">
         <div class="section metric-grid">
           <MetricCard label="近 1 月收益" :value="pct(indicator?.return_1m)" />
           <MetricCard label="近 1 年收益" :value="pct(indicator?.return_1y)" />
@@ -108,7 +137,7 @@ import { useRoute } from "vue-router";
 
 import { api } from "../api/fundpilot";
 import { dateText, pct, scoreText } from "../api/format";
-import type { AnalysisStatus, FundNav, Indicator, Score, WatchlistItem } from "../api/types";
+import type { AnalysisStatus, FundNav, Indicator, Score, SyncDiagnostics, WatchlistItem } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import ChartSkeleton from "../components/ChartSkeleton.vue";
 import FundSelector from "../components/FundSelector.vue";
@@ -134,6 +163,7 @@ const navSort = ref<{ prop: keyof FundNav; order: "ascending" | "descending" }>(
 const indicator = ref<Indicator | null>(null);
 const score = ref<Score | null>(null);
 const status = ref<AnalysisStatus | null>(null);
+const syncDiagnostics = ref<SyncDiagnostics | null>(null);
 const fundCode = computed(() => (manualCode.value || selected.value || String(route.params.fundCode || "")).trim());
 const needsFullAnalysis = computed(() => !navRows.value.length || !indicator.value || !score.value);
 const busy = computed(() => actionLoading.value !== null);
@@ -224,6 +254,15 @@ function handleNavSort({ prop, order }: { prop: keyof FundNav; order: "ascending
   navPage.value = 1;
 }
 
+function syncStatusText(statusText: string) {
+  const labels: Record<string, string> = {
+    success: "成功",
+    invalid_data: "数据质量异常",
+    error: "失败",
+  };
+  return labels[statusText] || statusText;
+}
+
 async function runAction(action: Exclude<ActionLoading, null>, work: () => Promise<void>) {
   actionLoading.value = action;
   try {
@@ -236,7 +275,7 @@ async function runAction(action: Exclude<ActionLoading, null>, work: () => Promi
 async function syncNav() {
   if (!fundCode.value) return;
   await runAction("sync", async () => {
-    await api.syncFundNav(fundCode.value);
+    syncDiagnostics.value = await api.syncFundNav(fundCode.value);
     ElMessage.success("净值已同步");
     await loadFund();
   });
@@ -263,7 +302,8 @@ async function calcScore() {
 async function analyze() {
   if (!fundCode.value) return;
   await runAction("analyze", async () => {
-    await api.analyzeFund(fundCode.value);
+    const result = await api.analyzeFund(fundCode.value);
+    syncDiagnostics.value = result.sync_diagnostics || null;
     ElMessage.success("同步分析完成");
     await loadFund();
   });

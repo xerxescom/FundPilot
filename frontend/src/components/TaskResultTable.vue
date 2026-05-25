@@ -9,18 +9,57 @@ import { computed } from "vue";
 
 const props = defineProps<{ result: unknown }>();
 
+function detailText(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "无";
+  if (Array.isArray(value)) return value.length ? value.map((item) => detailText(item)).join("；") : "无";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+function statusText(value: unknown): string {
+  if (typeof value !== "string") return "成功";
+  if (value.startsWith("failed:") || value === "error") return "失败";
+  if (value === "invalid_data") return "数据质量异常";
+  if (value === "success") return "成功";
+  return value;
+}
+
 const rows = computed(() => {
   if (Array.isArray(props.result)) {
-    return props.result.map((value, index) => ({ 序号: index + 1, 结果: String(value) }));
+    return props.result.map((value, index) => ({ 序号: index + 1, 结果: detailText(value) }));
   }
   if (props.result && typeof props.result === "object") {
-    return Object.entries(props.result as Record<string, unknown>).map(([key, value]) => ({
+    const result = props.result as Record<string, unknown>;
+    if (Array.isArray(result.steps)) {
+      const rowsFromSteps = result.steps.map((step, index) => {
+        const stepRecord = step as Record<string, unknown>;
+        return {
+          序号: index + 1,
+          步骤: detailText(stepRecord.label || stepRecord.key),
+          状态: statusText(stepRecord.status),
+          详情: detailText(stepRecord.result),
+        };
+      });
+      const diagnostics = result.sync_diagnostics as Record<string, unknown> | undefined;
+      if (diagnostics) {
+        rowsFromSteps.push({
+          序号: rowsFromSteps.length + 1,
+          步骤: "同步诊断",
+          状态: "成功",
+          详情: `数据源：${detailText(diagnostics.source)}；同步行数：${detailText(diagnostics.synced_rows)}；质量问题：${detailText(
+            (diagnostics.quality as Record<string, unknown> | undefined)?.issues
+          )}`,
+        });
+      }
+      return rowsFromSteps;
+    }
+    return Object.entries(result).map(([key, value]) => ({
       对象: key,
-      结果: typeof value === "string" && value.startsWith("failed:") ? "失败" : "成功",
-      详情: String(value),
+      结果: statusText(value),
+      详情: detailText(value),
     }));
   }
-  return [{ 结果: String(props.result ?? "") }];
+  return [{ 结果: detailText(props.result) }];
 });
 
 const columns = computed(() => Object.keys(rows.value[0] || {}));
