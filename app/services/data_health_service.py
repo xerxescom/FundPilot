@@ -7,7 +7,7 @@ from datetime import date
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import FundIndicator, FundNav, TaskRunLog, Watchlist
+from app.db.models import AIReport, FundIndicator, FundNav, FundScore, TaskRunLog, Watchlist
 
 STALE_NAV_DAYS = 7
 NAV_GAP_DAYS = 10
@@ -20,6 +20,25 @@ def _latest_indicator_date(db: Session, fund_code: str) -> date | None:
         .order_by(FundIndicator.calc_date.desc())
         .limit(1)
     )
+
+
+def _latest_score_date(db: Session, fund_code: str) -> date | None:
+    return db.scalar(
+        select(FundScore.score_date)
+        .where(FundScore.fund_code == fund_code)
+        .order_by(FundScore.score_date.desc())
+        .limit(1)
+    )
+
+
+def _latest_fund_report_date(db: Session, fund_code: str) -> date | None:
+    created_at = db.scalar(
+        select(AIReport.created_at)
+        .where(AIReport.report_type == "fund", AIReport.target_code == fund_code)
+        .order_by(AIReport.created_at.desc())
+        .limit(1)
+    )
+    return created_at.date() if created_at else None
 
 
 def _nav_dates(db: Session, fund_code: str) -> list[date]:
@@ -76,10 +95,16 @@ def fund_data_health(db: Session, fund_code: str, today: date | None = None) -> 
     ).all()
     gap_count = sum(1 for left, right in zip(dates, dates[1:]) if (right - left).days > NAV_GAP_DAYS)
     latest_indicator_date = _latest_indicator_date(db, fund_code)
+    latest_score_date = _latest_score_date(db, fund_code)
+    latest_report_date = _latest_fund_report_date(db, fund_code)
     latest_sync_status, latest_failure_reason, latest_sync_date = _latest_sync_status(db, fund_code)
     is_stale = latest_nav_date is None or (today - latest_nav_date).days > STALE_NAV_DAYS
     stale_days = (today - latest_nav_date).days if latest_nav_date else None
     needs_indicator = bool(latest_nav_date and (latest_indicator_date is None or latest_indicator_date < latest_nav_date))
+    needs_score = bool(
+        latest_indicator_date and (latest_score_date is None or latest_score_date < latest_indicator_date)
+    )
+    needs_report = bool(latest_score_date and (latest_report_date is None or latest_report_date < latest_score_date))
     status = "正常"
     issues = []
     if not dates:
@@ -99,6 +124,10 @@ def fund_data_health(db: Session, fund_code: str, today: date | None = None) -> 
         issues.append(f"存在 {missing_return_count} 条缺失日涨跌幅")
     if needs_indicator:
         issues.append("指标需要重新计算")
+    if needs_score:
+        issues.append("评分需要重新生成")
+    if needs_report:
+        issues.append("基金解释报告待生成")
 
     return {
         "fund_code": fund_code,
@@ -108,11 +137,15 @@ def fund_data_health(db: Session, fund_code: str, today: date | None = None) -> 
         "duplicate_date_count": len(duplicate_rows),
         "missing_daily_return_count": missing_return_count or 0,
         "latest_indicator_date": latest_indicator_date,
+        "latest_score_date": latest_score_date,
+        "latest_report_date": latest_report_date,
         "latest_sync_status": latest_sync_status,
         "latest_failure_reason": latest_failure_reason,
         "latest_sync_date": latest_sync_date,
         "stale_days": stale_days,
         "needs_indicator": needs_indicator,
+        "needs_score": needs_score,
+        "needs_report": needs_report,
         "is_stale": is_stale,
         "status": status,
         "issues": issues,
@@ -132,6 +165,8 @@ def data_health_overview(db: Session, today: date | None = None) -> dict:
         "stale_fund_count": sum(1 for item in funds if item["is_stale"]),
         "failed_fund_count": sum(1 for item in funds if item["nav_count"] == 0),
         "pending_indicator_count": sum(1 for item in funds if item["needs_indicator"]),
+        "pending_score_count": sum(1 for item in funds if item["needs_score"]),
+        "pending_report_count": sum(1 for item in funds if item["needs_report"]),
         "missing_daily_return_count": sum(item["missing_daily_return_count"] for item in funds),
         "gap_count": sum(item["gap_count"] for item in funds),
         "duplicate_date_count": sum(item["duplicate_date_count"] for item in funds),

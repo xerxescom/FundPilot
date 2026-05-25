@@ -90,6 +90,8 @@ def test_ollama_status_api_contract(monkeypatch):
 
 def test_dashboard_today_api_contract(db_session):
     db_session.add(Watchlist(fund_code="000001", fund_name="测试基金", is_active=True))
+    db_session.add(FundNav(fund_code="000001", nav_date=date(2026, 5, 24), unit_nav=Decimal("1.0")))
+    db_session.add(FundIndicator(fund_code="000001", calc_date=date(2026, 5, 24)))
     db_session.add(AlertEvent(alert_type="drawdown", fund_code="000001", title="回撤提醒", is_read=False))
     db_session.commit()
 
@@ -97,6 +99,7 @@ def test_dashboard_today_api_contract(db_session):
 
     assert payload["watchlist_count"] == 1
     assert payload["todos"]
+    assert any(item["key"] == "score" for item in payload["todos"])
     assert payload["unread_alerts"][0].title == "回撤提醒"
     assert "portfolio_diagnosis" in payload
 

@@ -204,6 +204,8 @@ export interface DataHealth {
   stale_fund_count: number;
   failed_fund_count: number;
   pending_indicator_count: number;
+  pending_score_count: number;
+  pending_report_count: number;
   missing_daily_return_count: number;
   gap_count: number;
   duplicate_date_count: number;

@@ -3,6 +3,8 @@
   <div v-else v-loading="loading || running" :element-loading-text="loadingText">
     <div class="metric-grid">
       <MetricCard label="待计算指标" :value="health?.pending_indicator_count ?? 0" />
+      <MetricCard label="待生成评分" :value="health?.pending_score_count ?? 0" />
+      <MetricCard label="待生成报告" :value="health?.pending_report_count ?? 0" />
       <MetricCard label="需关注数据" :value="health?.stale_fund_count ?? 0" />
       <MetricCard label="净值断档" :value="health?.gap_count ?? 0" />
       <MetricCard label="任务数量" :value="tasks.length" />

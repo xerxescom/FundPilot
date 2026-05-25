@@ -60,7 +60,7 @@ def analysis_status(db: Session, fund_code: str) -> dict:
     }
 
 
-def analyze_fund(db: Session, fund_code: str) -> dict:
+def analyze_fund(db: Session, fund_code: str, generate_report: bool = False) -> dict:
     fund_code = fund_code.zfill(6)
     result: dict[str, object] = {"fund_code": fund_code, "steps": []}
     sync_detail = nav_service.sync_fund_nav_detailed(db, fund_code)
@@ -76,8 +76,18 @@ def analyze_fund(db: Session, fund_code: str) -> dict:
     result["steps"].append({"key": "calc_indicator", "label": "计算指标", "status": "success", "result": indicator.calc_date})
     score = score_service.calculate_and_save_score(db, fund_code)
     result["steps"].append({"key": "calc_score", "label": "计算评分", "status": "success", "result": score.total_score})
-    report = generate_fund_explanation(db, fund_code)
-    result["steps"].append({"key": "fund_report", "label": "生成基金解释", "status": "success", "result": report.id})
+    if generate_report:
+        report = generate_fund_explanation(db, fund_code)
+        result["steps"].append({"key": "fund_report", "label": "生成基金解释", "status": "success", "result": report.id})
+    else:
+        result["steps"].append(
+            {
+                "key": "fund_report",
+                "label": "生成基金解释",
+                "status": "skipped",
+                "result": "已跳过耗时的 AI 解释生成，可在基金详情中单独触发。",
+            }
+        )
     result["sync_diagnostics"] = sync_detail
     result["status"] = analysis_status(db, fund_code)
     return result

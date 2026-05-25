@@ -104,6 +104,8 @@ def collect_daily_report_data(db: Session) -> dict:
             "latest_nav_date": data_health["latest_nav_date"],
             "stale_fund_count": data_health["stale_fund_count"],
             "pending_indicator_count": data_health["pending_indicator_count"],
+            "pending_score_count": data_health["pending_score_count"],
+            "pending_report_count": data_health["pending_report_count"],
             "gap_count": data_health["gap_count"],
         },
         "portfolio_overview": {

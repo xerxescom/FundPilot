@@ -24,6 +24,7 @@ function statusText(value: unknown): string {
   if (value.startsWith("failed:") || value === "error") return "失败";
   if (value === "invalid" || value === "invalid_data") return "数据质量异常";
   if (value === "failed") return "失败";
+  if (value === "skipped") return "已跳过";
   if (value === "success") return "成功";
   return value;
 }

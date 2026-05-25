@@ -68,6 +68,7 @@
         <MetricCard label="最新净值日期" :value="dateText(health?.latest_nav_date)" />
         <MetricCard label="需关注基金" :value="health?.stale_fund_count ?? 0" />
         <MetricCard label="待计算指标" :value="health?.pending_indicator_count ?? 0" />
+        <MetricCard label="待生成评分" :value="health?.pending_score_count ?? 0" />
         <MetricCard label="净值断档" :value="health?.gap_count ?? 0" />
       </div>
       <el-table class="section" :data="problemRows" border stripe>

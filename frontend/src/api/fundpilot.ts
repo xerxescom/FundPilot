@@ -21,7 +21,8 @@ export const api = {
   removeWatchlist: (code: string) => deleteJson(`/watchlist/${code}`),
   syncWatchlistNav: () => postJson<Record<string, SyncDiagnostics>>("/watchlist/sync-nav"),
   syncFundNav: (code: string) => postJson<SyncDiagnostics>(`/funds/${code}/sync-nav`),
-  analyzeFund: (code: string) => postJson<AnalyzeResult>(`/funds/${code}/analyze`),
+  analyzeFund: (code: string, generateReport = false) =>
+    postJson<AnalyzeResult>(`/funds/${code}/analyze`, undefined, { generate_report: generateReport }),
   analysisStatus: (code: string) => getJson<unknown>(`/funds/${code}/analysis-status`),
   nav: (code: string) => getJson<FundNav[]>(`/funds/${code}/nav`),
   calcIndicators: (code: string) => postJson<Indicator>(`/funds/${code}/calc-indicators`),
@@ -54,6 +55,7 @@ export const api = {
     getJson<unknown[]>("/correlation/returns", { fund_a: fundA, fund_b: fundB }),
   generateCorrelationAlerts: () => postJson<Alert[]>("/correlation/alerts"),
   generateDailyReport: () => postJson<Report>("/reports/daily"),
+  generateFundReport: (code: string) => postJson<Report>(`/reports/fund/${code}`),
   latestReport: () => getJson<Report>("/reports/latest"),
   reportHistory: (limit = 50) => getJson<Report[]>("/reports/history", { limit }),
   ollamaStatus: () => getJson<unknown>("/reports/ollama/status"),

@@ -52,8 +52,12 @@ def get_analysis_status(fund_code: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{fund_code}/analyze")
-def analyze_fund(fund_code: str, db: Session = Depends(get_db)):
-    return fund_analysis_service.analyze_fund(db, fund_code)
+def analyze_fund(
+    fund_code: str,
+    generate_report: bool = Query(default=False, description="是否同步生成耗时的基金 AI 解释"),
+    db: Session = Depends(get_db),
+):
+    return fund_analysis_service.analyze_fund(db, fund_code, generate_report=generate_report)
 
 
 @router.post("/{fund_code}/calc-indicators", response_model=IndicatorOut)

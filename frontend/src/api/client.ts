@@ -23,8 +23,8 @@ export async function getJson<T>(url: string, params?: Record<string, unknown>):
   return response.data;
 }
 
-export async function postJson<T>(url: string, data?: unknown): Promise<T> {
-  const response = await apiClient.post<T>(url, data);
+export async function postJson<T>(url: string, data?: unknown, params?: Record<string, unknown>): Promise<T> {
+  const response = await apiClient.post<T>(url, data, { params });
   return response.data;
 }
 

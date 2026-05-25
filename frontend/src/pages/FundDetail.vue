@@ -9,6 +9,9 @@
       <el-button type="primary" :loading="actionLoading === 'analyze'" :disabled="busy" @click="analyze">
         一键同步并分析
       </el-button>
+      <el-button :loading="actionLoading === 'report'" :disabled="busy || !score" @click="generateReport">
+        生成基金解释
+      </el-button>
     </div>
 
     <PageSkeleton v-if="loading && !hasLoadedOnce" class="section" />
@@ -42,7 +45,7 @@
         :closable="false"
         show-icon
         title="这只基金还没有完成同步分析"
-        description="当前基金缺少净值、指标或评分数据。请点击“一键同步并分析”完成数据同步、指标计算、评分生成和基金解释后再查看详情。"
+        description="当前基金缺少净值、指标或评分数据。请点击“一键同步并分析”先完成快速分析；基金解释可在评分生成后单独触发。"
       />
 
       <div v-if="needsFullAnalysis" class="section panel empty-action">
@@ -144,7 +147,7 @@ import FundSelector from "../components/FundSelector.vue";
 import MetricCard from "../components/MetricCard.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
 
-type ActionLoading = "sync" | "indicator" | "score" | "analyze" | null;
+type ActionLoading = "sync" | "indicator" | "score" | "analyze" | "report" | null;
 
 const route = useRoute();
 const watchlist = ref<WatchlistItem[]>([]);
@@ -169,7 +172,8 @@ const needsFullAnalysis = computed(() => !navRows.value.length || !indicator.val
 const busy = computed(() => actionLoading.value !== null);
 const activeStep = computed(() => status.value?.steps.filter((step) => step.done).length || 0);
 const loadingText = computed(() => {
-  if (actionLoading.value === "analyze") return "正在同步净值、计算指标、生成评分和基金解释...";
+  if (actionLoading.value === "analyze") return "正在同步净值、计算指标并生成评分...";
+  if (actionLoading.value === "report") return "正在调用模型生成基金解释，可能需要一点时间...";
   if (actionLoading.value === "sync") return "正在同步净值数据...";
   if (actionLoading.value === "indicator") return "正在计算指标...";
   if (actionLoading.value === "score") return "正在计算评分...";
@@ -261,6 +265,7 @@ function syncStatusText(statusText: string) {
     invalid_data: "数据质量异常",
     error: "失败",
     failed: "失败",
+    skipped: "已跳过",
   };
   return labels[statusText] || statusText;
 }
@@ -307,6 +312,15 @@ async function analyze() {
     const result = await api.analyzeFund(fundCode.value);
     syncDiagnostics.value = result.sync_diagnostics || null;
     ElMessage.success("同步分析完成");
+    await loadFund();
+  });
+}
+
+async function generateReport() {
+  if (!fundCode.value) return;
+  await runAction("report", async () => {
+    await api.generateFundReport(fundCode.value);
+    ElMessage.success("基金解释已生成");
     await loadFund();
   });
 }

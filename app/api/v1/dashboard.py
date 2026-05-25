@@ -70,6 +70,28 @@ def dashboard_today(db: Session = Depends(get_db)):
                 "level": "info",
             }
         )
+    if health["pending_score_count"]:
+        todos.append(
+            {
+                "key": "score",
+                "title": f"生成 {health['pending_score_count']} 只基金评分",
+                "description": "指标已经更新但评分还未生成，建议补齐评分后再查看排行和基金详情。",
+                "action": "calc_scores",
+                "route": "/tasks",
+                "level": "info",
+            }
+        )
+    if health["pending_report_count"]:
+        todos.append(
+            {
+                "key": "fund_report",
+                "title": f"生成 {health['pending_report_count']} 只基金解释",
+                "description": "部分基金已有评分但缺少解释报告，建议生成后用于复盘评分变化原因。",
+                "action": "generate_fund_reports",
+                "route": "/watchlist",
+                "level": "info",
+            }
+        )
     if alerts:
         todos.append(
             {
