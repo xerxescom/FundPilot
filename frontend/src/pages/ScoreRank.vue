@@ -25,8 +25,25 @@
         <el-table-column prop="fund_code" label="基金代码" />
         <el-table-column prop="fund_name" label="基金名称" min-width="180" />
         <el-table-column label="总分"><template #default="{ row }">{{ scoreText(row.total_score) }}</template></el-table-column>
+        <el-table-column label="可信度" min-width="120">
+          <template #default="{ row }">
+            <el-tag :type="confidenceTag(row.confidence_level)">
+              {{ confidenceText(row.confidence_level) }} {{ scoreText(row.confidence_score) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="窗口信号" min-width="140">
+          <template #default="{ row }">
+            <el-tag :type="signalTag(row.buy_window_signal)">
+              {{ signalText(row.buy_window_signal) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="rating" label="评级" />
         <el-table-column prop="strategy_name" label="评分策略" min-width="120" />
+        <el-table-column label="风险标签" min-width="180">
+          <template #default="{ row }">{{ row.risk_flags?.length ? row.risk_flags.join("；") : "无" }}</template>
+        </el-table-column>
         <el-table-column prop="reason" label="推荐理由" min-width="280" />
       </el-table>
     </div>
@@ -74,6 +91,35 @@ async function loadScores() {
   } finally {
     loading.value = false;
   }
+}
+
+function confidenceText(level?: Score["confidence_level"]) {
+  const labels = { high: "高", medium: "中", low: "低" };
+  return level ? labels[level] : "未知";
+}
+
+function confidenceTag(level?: Score["confidence_level"]) {
+  if (level === "high") return "success";
+  if (level === "medium") return "warning";
+  return "danger";
+}
+
+function signalText(signal?: Score["buy_window_signal"]) {
+  const labels = {
+    favorable: "窗口较好",
+    watch: "可以观察",
+    wait_pullback: "等待确认",
+    cautious: "谨慎观察",
+    blocked: "不可操作",
+  };
+  return signal ? labels[signal] : "暂无";
+}
+
+function signalTag(signal?: Score["buy_window_signal"]) {
+  if (signal === "favorable") return "success";
+  if (signal === "watch") return "primary";
+  if (signal === "wait_pullback") return "warning";
+  return "danger";
 }
 
 onMounted(async () => {

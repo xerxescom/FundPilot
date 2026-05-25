@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ScoreOut(BaseModel):
@@ -18,3 +18,8 @@ class ScoreOut(BaseModel):
     trade_status_score: Decimal | None = None
     rating: str | None = None
     reason: str | None = None
+    confidence_score: Decimal | None = None
+    confidence_level: str | None = None
+    buy_window_signal: str | None = None
+    buy_window_reason: str | None = None
+    risk_flags: list[str] = Field(default_factory=list)

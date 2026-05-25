@@ -24,6 +24,8 @@
           <MetricCard label="分析状态" :value="status.status_label" :hint="status.data_status" />
           <MetricCard label="最新净值" :value="status.latest_nav ?? '暂无'" :hint="dateText(status.latest_nav_date)" />
           <MetricCard label="当前评级" :value="status.rating || '暂无'" :hint="scoreText(status.latest_score)" />
+          <MetricCard label="评分可信度" :value="confidenceText(score?.confidence_level)" :hint="scoreText(score?.confidence_score)" />
+          <MetricCard label="窗口信号" :value="signalText(score?.buy_window_signal)" :hint="score?.buy_window_reason || '不构成投资建议'" />
         </div>
         <el-steps class="section" :active="activeStep" finish-status="success" simple>
           <el-step v-for="step in status.steps" :key="step.key" :title="step.label" />
@@ -35,6 +37,14 @@
           :closable="false"
           title="评分原因"
           :description="status.score_reason"
+        />
+        <el-alert
+          v-if="score?.risk_flags?.length"
+          class="section"
+          type="warning"
+          :closable="false"
+          title="风险提示"
+          :description="score.risk_flags.join('；')"
         />
       </div>
 
@@ -89,6 +99,8 @@
           <MetricCard label="近 1 年收益" :value="pct(indicator?.return_1y)" />
           <MetricCard label="最大回撤" :value="pct(indicator?.max_drawdown_1y)" />
           <MetricCard label="评分" :value="scoreText(score?.total_score)" :hint="score?.rating" />
+          <MetricCard label="可信度" :value="confidenceText(score?.confidence_level)" :hint="scoreText(score?.confidence_score)" />
+          <MetricCard label="窗口信号" :value="signalText(score?.buy_window_signal)" :hint="score?.buy_window_reason" />
         </div>
 
         <div class="section panel chart-panel">
@@ -268,6 +280,22 @@ function syncStatusText(statusText: string) {
     skipped: "已跳过",
   };
   return labels[statusText] || statusText;
+}
+
+function confidenceText(level?: Score["confidence_level"] | null) {
+  const labels = { high: "高", medium: "中", low: "低" };
+  return level ? labels[level] : "暂无";
+}
+
+function signalText(signal?: Score["buy_window_signal"] | null) {
+  const labels = {
+    favorable: "窗口较好",
+    watch: "可以观察",
+    wait_pullback: "等待确认",
+    cautious: "谨慎观察",
+    blocked: "不可操作",
+  };
+  return signal ? labels[signal] : "暂无";
 }
 
 async function runAction(action: Exclude<ActionLoading, null>, work: () => Promise<void>) {

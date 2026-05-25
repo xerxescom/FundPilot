@@ -24,6 +24,11 @@ export interface Score {
   trade_status_score?: Nullable<number>;
   rating?: Nullable<string>;
   reason?: Nullable<string>;
+  confidence_score?: Nullable<number>;
+  confidence_level?: Nullable<"high" | "medium" | "low">;
+  buy_window_signal?: Nullable<"favorable" | "watch" | "wait_pullback" | "cautious" | "blocked">;
+  buy_window_reason?: Nullable<string>;
+  risk_flags?: string[];
   strategy?: Nullable<string>;
   strategy_name?: Nullable<string>;
   strategy_scenario?: Nullable<string>;

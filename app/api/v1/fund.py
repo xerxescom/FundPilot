@@ -75,17 +75,18 @@ def get_indicators(fund_code: str, db: Session = Depends(get_db)):
 
 @router.post("/{fund_code}/calc-score", response_model=ScoreOut)
 def calc_score(fund_code: str, db: Session = Depends(get_db)):
-    return score_service.calculate_and_save_score(db, fund_code)
+    score_service.calculate_and_save_score(db, fund_code)
+    return score_service.score_payload(db, fund_code)
 
 
 @router.get("/{fund_code}/score", response_model=ScoreOut)
 def get_score(fund_code: str, db: Session = Depends(get_db)):
-    score = score_service.latest_score(db, fund_code)
-    if not score:
+    payload = score_service.score_payload(db, fund_code)
+    if not payload:
         raise HTTPException(status_code=404, detail="Score not found")
-    return score
+    return payload
 
 
 @recommendation_router.get("/top", response_model=list[ScoreOut])
 def recommendations_top(limit: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db)):
-    return score_service.top_scores(db, limit=limit)
+    return score_service.top_scores_by_strategy(db, strategy="default", limit=limit)

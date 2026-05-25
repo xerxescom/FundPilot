@@ -186,3 +186,6 @@ def test_score_strategy_api_contract(db_session):
 
     assert strategies[0]["name"] == "默认策略"
     assert rows[0]["strategy_name"] == "稳健型"
+    assert "confidence_score" in rows[0]
+    assert "buy_window_signal" in rows[0]
+    assert "risk_flags" in rows[0]
