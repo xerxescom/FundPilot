@@ -17,6 +17,12 @@ def _is_failed_result(value: object) -> bool:
     return False
 
 
+def result_counts(result: object) -> tuple[int | None, int]:
+    success_count = len(result) if isinstance(result, (list, dict)) else None
+    failure_count = sum(1 for value in result.values() if _is_failed_result(value)) if isinstance(result, dict) else 0
+    return success_count, failure_count
+
+
 def record_task_log(
     db: Session,
     task_name: str,
@@ -40,6 +46,28 @@ def record_task_log(
     return log
 
 
+def update_task_log(
+    db: Session,
+    log_id: int,
+    status: str,
+    duration_ms: int | None = None,
+    success_count: int | None = None,
+    failure_count: int | None = None,
+    message: str | None = None,
+) -> TaskRunLog:
+    log = db.get(TaskRunLog, log_id)
+    if not log:
+        raise ValueError(f"Task log not found: {log_id}")
+    log.status = status
+    log.duration_ms = duration_ms
+    log.success_count = success_count
+    log.failure_count = failure_count
+    log.message = message
+    db.commit()
+    db.refresh(log)
+    return log
+
+
 def run_logged(db: Session, task_name: str, fn: Callable[[], T]) -> T:
     started = perf_counter()
     try:
@@ -54,8 +82,7 @@ def run_logged(db: Session, task_name: str, fn: Callable[[], T]) -> T:
         )
         raise
 
-    success_count = len(result) if isinstance(result, (list, dict)) else None
-    failure_count = sum(1 for value in result.values() if _is_failed_result(value)) if isinstance(result, dict) else 0
+    success_count, failure_count = result_counts(result)
     record_task_log(
         db,
         task_name=task_name,

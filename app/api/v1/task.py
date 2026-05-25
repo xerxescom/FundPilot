@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.task import TaskLogOut
 from app.services.task_log_service import latest_task_logs
-from app.services.task_runner_service import available_tasks, run_task
+from app.services.task_runner_service import available_tasks, enqueue_task, run_queued_task, run_task
 
 router = APIRouter()
 
@@ -25,3 +25,17 @@ def run_named_task(task_name: str, db: Session = Depends(get_db)):
         return run_task(db, task_name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/enqueue/{task_name}", response_model=TaskLogOut)
+def enqueue_named_task(
+    task_name: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    try:
+        log = enqueue_task(db, task_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    background_tasks.add_task(run_queued_task, log.id, task_name)
+    return log

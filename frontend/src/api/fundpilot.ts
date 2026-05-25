@@ -63,4 +63,5 @@ export const api = {
   availableTasks: () =>
     getJson<Array<{ task_name: string; description: string; priority: string; scenario: string }>>("/tasks/available"),
   runTask: (task: string) => postJson<unknown>(`/tasks/run/${task}`),
+  enqueueTask: (task: string) => postJson<unknown>(`/tasks/enqueue/${task}`),
 };

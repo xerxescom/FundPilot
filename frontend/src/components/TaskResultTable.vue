@@ -25,6 +25,8 @@ function statusText(value: unknown): string {
   if (value === "invalid" || value === "invalid_data") return "数据质量异常";
   if (value === "failed") return "失败";
   if (value === "skipped") return "已跳过";
+  if (value === "queued") return "排队中";
+  if (value === "running") return "执行中";
   if (value === "success") return "成功";
   return value;
 }

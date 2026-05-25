@@ -1,6 +1,6 @@
 <template>
   <PageSkeleton v-if="loading && !hasLoadedOnce" />
-  <div v-else v-loading="loading || running" :element-loading-text="loadingText">
+  <div v-else v-loading="loading || running || Boolean(enqueueingTask)" :element-loading-text="loadingText">
     <div class="metric-grid">
       <MetricCard label="待计算指标" :value="health?.pending_indicator_count ?? 0" />
       <MetricCard label="待生成评分" :value="health?.pending_score_count ?? 0" />
@@ -47,8 +47,16 @@
             :value="item.task_name"
           />
         </el-select>
-        <el-button :loading="runningTask === selectedTask" :disabled="running" @click="run(selectedTask)">
-          运行选中任务
+        <el-button :loading="runningTask === selectedTask" :disabled="running || Boolean(enqueueingTask)" @click="run(selectedTask)">
+          前台运行
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="enqueueingTask === selectedTask"
+          :disabled="running || Boolean(enqueueingTask)"
+          @click="enqueue(selectedTask)"
+        >
+          后台运行
         </el-button>
       </div>
       <el-table :data="tasks" border stripe>
@@ -68,6 +76,7 @@
 </template>
 
 <script setup lang="ts">
+import { ElMessage } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 
 import { api } from "../api/fundpilot";
@@ -92,8 +101,13 @@ const result = ref<unknown>();
 const loading = ref(false);
 const hasLoadedOnce = ref(false);
 const runningTask = ref("");
+const enqueueingTask = ref("");
 const running = computed(() => Boolean(runningTask.value));
-const loadingText = computed(() => (running.value ? `正在运行任务：${runningTask.value}` : "正在加载任务中心..."));
+const loadingText = computed(() => {
+  if (running.value) return `正在前台运行任务：${runningTask.value}`;
+  if (enqueueingTask.value) return `正在提交后台任务：${enqueueingTask.value}`;
+  return "正在加载任务中心...";
+});
 
 async function load() {
   loading.value = true;
@@ -118,6 +132,19 @@ async function run(task: string) {
     await load();
   } finally {
     runningTask.value = "";
+  }
+}
+
+async function enqueue(task: string) {
+  if (!task || running.value || enqueueingTask.value) return;
+  enqueueingTask.value = task;
+  result.value = undefined;
+  try {
+    result.value = await api.enqueueTask(task);
+    ElMessage.success("任务已提交后台执行");
+    await load();
+  } finally {
+    enqueueingTask.value = "";
   }
 }
 
