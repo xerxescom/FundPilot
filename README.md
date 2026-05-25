@@ -30,7 +30,7 @@ flowchart LR
 - 业务服务：`app/services`，集中处理同步、指标、评分、组合、预警、相关性和报告逻辑。
 - 数据源：`app/data_source`，封装 AKShare 和 Eastmoney。
 - 数据库：SQLAlchemy ORM + Alembic 迁移。
-- 定时任务：`app/jobs`，默认关闭，可用 `ENABLE_SCHEDULER=true` 开启。
+- 任务：当前支持手动任务和 APScheduler；后续路线见 [功能路线图](docs/feature_roadmap.md)。
 
 ## 项目结构
 
@@ -39,7 +39,7 @@ FundPilot/
 ├── app/                 # FastAPI 后端、业务服务、数据库模型
 ├── frontend/            # Vue 3 前端工作台
 ├── alembic/             # 数据库迁移
-├── docs/                # 架构、数据库、评分、AI 安全和前端覆盖说明
+├── docs/                # 架构、数据库、评分、AI 安全和路线说明
 ├── scripts/             # 手动任务入口
 ├── tests/               # 后端服务和 API 契约测试
 ├── docker-compose.yml
@@ -70,6 +70,8 @@ npm run dev
 - FastAPI: http://127.0.0.1:8000
 - API docs: http://127.0.0.1:8000/docs
 - Vue: http://127.0.0.1:5173
+
+Docker 部署使用独立配置，见 [Docker 配置说明](docs/docker_config.md)。
 
 ## 常用配置
 

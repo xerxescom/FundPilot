@@ -23,10 +23,40 @@ def run_task(db: Session, task_name: str):
 
 def available_tasks() -> list[dict[str, str]]:
     return [
-        {"task_name": "sync_watchlist_nav", "description": "同步全部自选基金净值"},
-        {"task_name": "calc_indicators", "description": "计算全部自选基金指标"},
-        {"task_name": "calc_scores", "description": "计算全部自选基金评分"},
-        {"task_name": "generate_alerts", "description": "生成风险预警"},
-        {"task_name": "sync_market_context", "description": "同步市场背景"},
-        {"task_name": "generate_daily_report", "description": "生成每日基金简报"},
+        {
+            "task_name": "sync_watchlist_nav",
+            "description": "同步全部自选基金净值",
+            "priority": "P0",
+            "scenario": "基金数据抓取与指标分析",
+        },
+        {
+            "task_name": "calc_indicators",
+            "description": "计算全部自选基金指标",
+            "priority": "P0",
+            "scenario": "基金数据抓取与指标分析",
+        },
+        {
+            "task_name": "calc_scores",
+            "description": "计算全部自选基金评分",
+            "priority": "P1",
+            "scenario": "多策略基金评分体系的默认评分基础",
+        },
+        {
+            "task_name": "generate_alerts",
+            "description": "生成风险预警",
+            "priority": "P0",
+            "scenario": "日常复盘和风险识别",
+        },
+        {
+            "task_name": "sync_market_context",
+            "description": "同步市场背景",
+            "priority": "P2",
+            "scenario": "热点新闻和市场解释的前置数据",
+        },
+        {
+            "task_name": "generate_daily_report",
+            "description": "生成每日基金简报",
+            "priority": "P3",
+            "scenario": "AI 投研观察与风险解释",
+        },
     ]

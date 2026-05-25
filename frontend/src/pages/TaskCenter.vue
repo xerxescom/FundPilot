@@ -7,6 +7,7 @@
       <MetricCard label="净值断档" :value="health?.gap_count ?? 0" />
       <MetricCard label="任务数量" :value="tasks.length" />
     </div>
+
     <div class="section panel">
       <h2 class="section-title">快捷任务</h2>
       <div class="toolbar">
@@ -32,14 +33,15 @@
       <el-skeleton v-if="running && !result" :rows="4" animated />
       <TaskResultTable v-if="result" :result="result" />
     </div>
+
     <div class="section panel">
       <h2 class="section-title">按名称触发任务</h2>
       <div class="toolbar">
-        <el-select v-model="selectedTask" style="min-width: 360px" :disabled="running">
+        <el-select v-model="selectedTask" style="min-width: 460px" :disabled="running">
           <el-option
             v-for="item in tasks"
             :key="item.task_name"
-            :label="`${item.description}（${item.task_name}）`"
+            :label="`${item.priority}｜${item.description}｜${item.scenario}`"
             :value="item.task_name"
           />
         </el-select>
@@ -47,7 +49,14 @@
           运行选中任务
         </el-button>
       </div>
+      <el-table :data="tasks" border stripe>
+        <el-table-column prop="priority" label="优先级" width="90" />
+        <el-table-column prop="description" label="任务名称" min-width="180" />
+        <el-table-column prop="scenario" label="应用场景" min-width="240" />
+        <el-table-column prop="task_name" label="任务标识" min-width="180" />
+      </el-table>
     </div>
+
     <div class="section panel">
       <h2 class="section-title">最近任务日志</h2>
       <el-skeleton v-if="loading" :rows="6" animated />
@@ -66,8 +75,15 @@ import MetricCard from "../components/MetricCard.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
 import TaskResultTable from "../components/TaskResultTable.vue";
 
+interface AvailableTask {
+  task_name: string;
+  description: string;
+  priority: string;
+  scenario: string;
+}
+
 const health = ref<DataHealth | null>(null);
-const tasks = ref<Array<{ task_name: string; description: string }>>([]);
+const tasks = ref<AvailableTask[]>([]);
 const selectedTask = ref("");
 const logs = ref<Array<Record<string, unknown>>>([]);
 const result = ref<unknown>();
@@ -82,7 +98,7 @@ async function load() {
   try {
     const [healthData, taskData, logData] = await Promise.all([api.dataHealth(), api.availableTasks(), api.taskLogs()]);
     health.value = healthData;
-    tasks.value = taskData;
+    tasks.value = taskData as AvailableTask[];
     logs.value = logData as Array<Record<string, unknown>>;
     selectedTask.value ||= tasks.value[0]?.task_name || "";
     hasLoadedOnce.value = true;

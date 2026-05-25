@@ -56,6 +56,7 @@ export const api = {
   reportHistory: (limit = 50) => getJson<Report[]>("/reports/history", { limit }),
   ollamaStatus: () => getJson<unknown>("/reports/ollama/status"),
   taskLogs: () => getJson<unknown[]>("/tasks/logs"),
-  availableTasks: () => getJson<Array<{ task_name: string; description: string }>>("/tasks/available"),
+  availableTasks: () =>
+    getJson<Array<{ task_name: string; description: string; priority: string; scenario: string }>>("/tasks/available"),
   runTask: (task: string) => postJson<unknown>(`/tasks/run/${task}`),
 };
