@@ -31,6 +31,10 @@ export interface Score {
   risk_flags?: string[];
   market_signal?: Nullable<"supportive" | "neutral" | "weak">;
   market_reason?: Nullable<string>;
+  peer_group?: Nullable<string>;
+  peer_group_size?: Nullable<number>;
+  peer_percentile?: Nullable<number>;
+  peer_reason?: Nullable<string>;
   portfolio_fit_score?: Nullable<number>;
   portfolio_fit_level?: Nullable<"high" | "medium" | "low">;
   portfolio_fit_reason?: Nullable<string>;

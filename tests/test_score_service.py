@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from app.db.models import FundInfo, FundIndicator, FundNav, FundScore, MarketIndexDaily, PortfolioPosition
+from app.db.models import FundInfo, FundIndicator, FundNav, FundScore, MarketIndexDaily, PortfolioPosition, Watchlist
 from app.services.score_service import (
     available_strategies,
     score_indicator,
@@ -206,6 +206,53 @@ def test_score_payload_portfolio_concentration_downgrades_window(db_session):
     assert payload["portfolio_fit_level"] == "low"
     assert payload["buy_window_signal"] == "cautious"
     assert "portfolio_concentration" in payload["risk_flags"]
+
+
+def test_score_payload_low_peer_rank_downgrades_window(db_session):
+    today = date.today()
+    rows = [
+        ("000001", Decimal("0.25"), Decimal("-0.05"), Decimal("0.10"), Decimal("1.30")),
+        ("000002", Decimal("0.40"), Decimal("-0.02"), Decimal("0.05"), Decimal("2.00")),
+        ("000003", Decimal("0.42"), Decimal("-0.01"), Decimal("0.04"), Decimal("2.20")),
+        ("000004", Decimal("0.38"), Decimal("-0.03"), Decimal("0.06"), Decimal("1.90")),
+    ]
+    for code, ret_1y, drawdown, volatility, sharpe in rows:
+        db_session.add_all(
+            [
+                Watchlist(fund_code=code, fund_name=f"测试{code}", industry="宽基", is_active=True),
+                FundInfo(
+                    fund_code=code,
+                    fund_name=f"测试{code}",
+                    establish_date=date(2020, 1, 1),
+                    fund_size=Decimal("30"),
+                    buy_status="开放申购",
+                ),
+                FundIndicator(
+                    fund_code=code,
+                    calc_date=today,
+                    return_1m=Decimal("0.02"),
+                    return_3m=Decimal("0.05"),
+                    return_6m=Decimal("0.12"),
+                    return_1y=ret_1y,
+                    max_drawdown_1y=drawdown,
+                    volatility_1y=volatility,
+                    sharpe_1y=sharpe,
+                    win_rate_1y=Decimal("0.60"),
+                ),
+                FundNav(fund_code=code, nav_date=date(2025, 1, 1), unit_nav=Decimal("1.0")),
+                FundNav(fund_code=code, nav_date=today, unit_nav=Decimal("1.3")),
+            ]
+        )
+    db_session.add(FundScore(fund_code="000001", score_date=today, total_score=Decimal("92"), rating="重点关注"))
+    db_session.commit()
+
+    payload = score_payload(db_session, "000001")
+
+    assert payload["peer_group"] == "宽基"
+    assert payload["peer_group_size"] == 4
+    assert payload["peer_percentile"] <= 0.30
+    assert payload["buy_window_signal"] == "wait_pullback"
+    assert "peer_rank_low" in payload["risk_flags"]
 
 
 def test_top_scores_deduplicates_by_latest_fund_code(db_session):

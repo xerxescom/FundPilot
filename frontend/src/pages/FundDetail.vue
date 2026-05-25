@@ -27,6 +27,7 @@
           <MetricCard label="评分可信度" :value="confidenceText(score?.confidence_level)" :hint="scoreText(score?.confidence_score)" />
           <MetricCard label="窗口信号" :value="signalText(score?.buy_window_signal)" :hint="score?.buy_window_reason || '不构成投资建议'" />
           <MetricCard label="市场环境" :value="marketText(score?.market_signal)" :hint="score?.market_reason" />
+          <MetricCard label="同类排名" :value="peerText(score)" :hint="score?.peer_reason" />
           <MetricCard label="组合适配" :value="fitText(score?.portfolio_fit_level)" :hint="score?.portfolio_fit_reason" />
         </div>
         <el-steps class="section" :active="activeStep" finish-status="success" simple>
@@ -104,6 +105,7 @@
           <MetricCard label="可信度" :value="confidenceText(score?.confidence_level)" :hint="scoreText(score?.confidence_score)" />
           <MetricCard label="窗口信号" :value="signalText(score?.buy_window_signal)" :hint="score?.buy_window_reason" />
           <MetricCard label="市场环境" :value="marketText(score?.market_signal)" :hint="score?.market_reason" />
+          <MetricCard label="同类排名" :value="peerText(score)" :hint="score?.peer_reason" />
           <MetricCard label="组合适配" :value="fitText(score?.portfolio_fit_level)" :hint="score?.portfolio_fit_reason" />
         </div>
 
@@ -305,6 +307,14 @@ function signalText(signal?: Score["buy_window_signal"] | null) {
 function marketText(signal?: Score["market_signal"] | null) {
   const labels = { supportive: "偏强", neutral: "中性", weak: "偏弱" };
   return signal ? labels[signal] : "暂无";
+}
+
+function peerText(row?: Score | null) {
+  if (!row) return "暂无";
+  if (row.peer_percentile === null || row.peer_percentile === undefined) {
+    return row.peer_group ? `${row.peer_group} 样本不足` : "暂无";
+  }
+  return `${Math.round(row.peer_percentile * 100)}%`;
 }
 
 function fitText(level?: Score["portfolio_fit_level"] | null) {

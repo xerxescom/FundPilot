@@ -278,9 +278,117 @@ def _portfolio_fit(db: Session, fund_code: str) -> dict:
     }
 
 
-def _apply_context(payload: dict, market: dict, portfolio: dict) -> dict:
+def _peer_group_name(fund: FundInfo | None, watchlist: Watchlist | None) -> str:
+    if watchlist and watchlist.industry:
+        return watchlist.industry
+    if fund and fund.fund_type:
+        return fund.fund_type
+    return "未分类"
+
+
+def _percentile_rank(values: list[float], value: float, higher_is_better: bool = True) -> float:
+    if not values:
+        return 0.5
+    better_or_equal = sum(
+        1
+        for item in values
+        if (item <= value if higher_is_better else item >= value)
+    )
+    return better_or_equal / len(values)
+
+
+def _peer_comparison(db: Session, fund_code: str, indicator: FundIndicator | None, fund: FundInfo | None) -> dict:
+    fund_code = fund_code.zfill(6)
+    watchlist = db.scalar(
+        select(Watchlist)
+        .where(Watchlist.fund_code == fund_code, Watchlist.is_active.is_(True))
+        .order_by(Watchlist.created_at.desc())
+        .limit(1)
+    )
+    peer_group = _peer_group_name(fund, watchlist)
+    if not indicator:
+        return {
+            "peer_group": peer_group,
+            "peer_group_size": 0,
+            "peer_percentile": None,
+            "peer_reason": "缺少最新指标，无法进行同类比较",
+            "peer_risk_flags": ["peer_indicator_missing"],
+        }
+
+    latest_indicator_sq = (
+        select(FundIndicator.fund_code, func.max(FundIndicator.calc_date).label("latest_date"))
+        .group_by(FundIndicator.fund_code)
+        .subquery()
+    )
+    rows = db.execute(
+        select(FundIndicator, FundInfo, Watchlist)
+        .join(
+            latest_indicator_sq,
+            (FundIndicator.fund_code == latest_indicator_sq.c.fund_code)
+            & (FundIndicator.calc_date == latest_indicator_sq.c.latest_date),
+        )
+        .outerjoin(FundInfo, FundInfo.fund_code == FundIndicator.fund_code)
+        .outerjoin(
+            Watchlist,
+            (Watchlist.fund_code == FundIndicator.fund_code) & (Watchlist.is_active.is_(True)),
+        )
+    ).all()
+    peers = [
+        peer_indicator
+        for peer_indicator, peer_fund, peer_watchlist in rows
+        if _peer_group_name(peer_fund, peer_watchlist) == peer_group
+    ]
+    peer_count = len(peers)
+    if peer_count < 3:
+        return {
+            "peer_group": peer_group,
+            "peer_group_size": peer_count,
+            "peer_percentile": None,
+            "peer_reason": "同类样本不足3只，暂不使用同类排名影响窗口信号",
+            "peer_risk_flags": [],
+        }
+
+    metrics: list[float] = []
+    for values, value, higher_is_better in [
+        ([item for item in [_value(peer.return_1y) for peer in peers] if item is not None], _value(indicator.return_1y), True),
+        ([item for item in [_value(peer.max_drawdown_1y) for peer in peers] if item is not None], _value(indicator.max_drawdown_1y), True),
+        ([item for item in [_value(peer.volatility_1y) for peer in peers] if item is not None], _value(indicator.volatility_1y), False),
+        ([item for item in [_value(peer.sharpe_1y) for peer in peers] if item is not None], _value(indicator.sharpe_1y), True),
+    ]:
+        if value is not None and values:
+            metrics.append(_percentile_rank(values, value, higher_is_better))
+    if not metrics:
+        return {
+            "peer_group": peer_group,
+            "peer_group_size": peer_count,
+            "peer_percentile": None,
+            "peer_reason": "同类基金关键指标不足，暂不使用同类排名影响窗口信号",
+            "peer_risk_flags": ["peer_metric_missing"],
+        }
+
+    percentile = round(sum(metrics) / len(metrics), 4)
+    if percentile >= 0.70:
+        reason = f"在 {peer_group} 同类基金中综合百分位较高"
+        flags: list[str] = []
+    elif percentile <= 0.30:
+        reason = f"在 {peer_group} 同类基金中综合百分位偏低"
+        flags = ["peer_rank_low"]
+    else:
+        reason = f"在 {peer_group} 同类基金中综合百分位处于中游"
+        flags = []
+    return {
+        "peer_group": peer_group,
+        "peer_group_size": peer_count,
+        "peer_percentile": percentile,
+        "peer_reason": reason,
+        "peer_risk_flags": flags,
+    }
+
+
+def _apply_context(payload: dict, market: dict, portfolio: dict, peer: dict) -> dict:
     risk_flags = set(payload.get("risk_flags") or [])
     risk_flags.update(portfolio.get("portfolio_risk_flags") or [])
+    risk_flags.update(peer.get("peer_risk_flags") or [])
     signal = payload.get("buy_window_signal")
     reason = payload.get("buy_window_reason") or ""
 
@@ -300,9 +408,17 @@ def _apply_context(payload: dict, market: dict, portfolio: dict) -> dict:
         signal = "watch"
         reason = f"{reason}；组合适配一般，窗口信号降为观察"
 
+    if "peer_rank_low" in risk_flags and signal in {"favorable", "watch"}:
+        signal = "wait_pullback"
+        reason = f"{reason}；同类排名偏低，等待相对表现改善"
+
     payload.update(
         {
             **market,
+            "peer_group": peer["peer_group"],
+            "peer_group_size": peer["peer_group_size"],
+            "peer_percentile": peer["peer_percentile"],
+            "peer_reason": peer["peer_reason"],
             "portfolio_fit_score": portfolio["portfolio_fit_score"],
             "portfolio_fit_level": portfolio["portfolio_fit_level"],
             "portfolio_fit_reason": portfolio["portfolio_fit_reason"],
@@ -630,7 +746,7 @@ def score_payload(db: Session, fund_code: str) -> dict | None:
                 "risk_flags": ["indicator_missing"],
             }
         )
-    return _apply_context(payload, _market_signal(db), _portfolio_fit(db, fund_code))
+    return _apply_context(payload, _market_signal(db), _portfolio_fit(db, fund_code), _peer_comparison(db, fund_code, indicator, fund))
 
 
 def calculate_watchlist_scores(db: Session) -> dict[str, str]:
@@ -707,7 +823,12 @@ def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 
     scored = []
     for indicator, fund in rows:
         item = score_indicator_with_strategy(indicator, fund, strategy, _nav_stats(db, indicator.fund_code))
-        item = _apply_context(item, _market_signal(db), _portfolio_fit(db, indicator.fund_code))
+        item = _apply_context(
+            item,
+            _market_signal(db),
+            _portfolio_fit(db, indicator.fund_code),
+            _peer_comparison(db, indicator.fund_code, indicator, fund),
+        )
         scored.append(
             {
                 "fund_code": indicator.fund_code,

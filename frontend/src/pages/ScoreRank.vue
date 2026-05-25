@@ -44,6 +44,11 @@
             <el-tag :type="marketTag(row.market_signal)">{{ marketText(row.market_signal) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="同类排名" min-width="140">
+          <template #default="{ row }">
+            {{ peerText(row) }}
+          </template>
+        </el-table-column>
         <el-table-column label="组合适配" min-width="130">
           <template #default="{ row }">
             <el-tag :type="fitTag(row.portfolio_fit_level)">
@@ -143,6 +148,13 @@ function marketTag(signal?: Score["market_signal"]) {
   if (signal === "supportive") return "success";
   if (signal === "weak") return "warning";
   return "info";
+}
+
+function peerText(row: Score) {
+  if (row.peer_percentile === null || row.peer_percentile === undefined) {
+    return row.peer_group ? `${row.peer_group} 样本不足` : "暂无";
+  }
+  return `${Math.round(row.peer_percentile * 100)}% / ${row.peer_group_size || 0}`;
 }
 
 function fitText(level?: Score["portfolio_fit_level"]) {
