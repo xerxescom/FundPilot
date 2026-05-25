@@ -2,10 +2,14 @@ from datetime import date
 from decimal import Decimal
 
 from app.api.v1.correlation import correlation_matrix, fund_return_series
-from app.api.v1.dashboard import dashboard_overview
+from app.api.v1.alert import update_alert
+from app.api.v1.dashboard import dashboard_overview, dashboard_today
+from app.api.v1.fund import get_analysis_status
+from app.api.v1.portfolio import portfolio_diagnosis
 from app.api.v1.report import ollama_status
 from app.api.v1.research import industry_overview, risk_return_points
-from app.db.models import FundIndicator, FundNav, FundScore, Watchlist
+from app.db.models import AlertEvent, FundIndicator, FundNav, FundScore, PortfolioPosition, Watchlist
+from app.schemas.alert import AlertUpdate
 from app.services.ai.ollama_client import OllamaClient
 
 
@@ -81,3 +85,59 @@ def test_ollama_status_api_contract(monkeypatch):
     monkeypatch.setattr(OllamaClient, "check_model_available", fake_status)
 
     assert ollama_status()["model_available"] is True
+
+
+def test_dashboard_today_api_contract(db_session):
+    db_session.add(Watchlist(fund_code="000001", fund_name="测试基金", is_active=True))
+    db_session.add(AlertEvent(alert_type="drawdown", fund_code="000001", title="回撤提醒", is_read=False))
+    db_session.commit()
+
+    payload = dashboard_today(db_session)
+
+    assert payload["watchlist_count"] == 1
+    assert payload["todos"]
+    assert payload["unread_alerts"][0].title == "回撤提醒"
+    assert "portfolio_diagnosis" in payload
+
+
+def test_analysis_status_api_contract(db_session):
+    db_session.add(Watchlist(fund_code="000001", fund_name="测试基金", is_active=True))
+    db_session.add(FundNav(fund_code="000001", nav_date=date(2026, 5, 24), unit_nav=Decimal("1.0")))
+    db_session.add(FundIndicator(fund_code="000001", calc_date=date(2026, 5, 24)))
+    db_session.add(FundScore(fund_code="000001", score_date=date(2026, 5, 24), total_score=Decimal("80"), rating="稳健观察"))
+    db_session.commit()
+
+    payload = get_analysis_status("000001", db_session)
+
+    assert payload["status"] == "score_ready"
+    assert payload["steps"][0]["done"] is True
+    assert payload["rating"] == "稳健观察"
+
+
+def test_portfolio_diagnosis_api_contract(db_session):
+    db_session.add(
+        PortfolioPosition(
+            fund_code="000001",
+            holding_amount=Decimal("1000"),
+            holding_share=Decimal("1000"),
+            cost_nav=Decimal("1"),
+        )
+    )
+    db_session.commit()
+
+    payload = portfolio_diagnosis(db_session)
+
+    assert payload["summary"]["position_count"] == 1
+    assert payload["risk_items"]
+    assert "不构成买入或卖出建议" in payload["observation"]
+
+
+def test_alert_status_update_api_contract(db_session):
+    alert = AlertEvent(alert_type="score_drop", fund_code="000001", title="评分下降", is_read=False)
+    db_session.add(alert)
+    db_session.commit()
+
+    updated = update_alert(alert.id, AlertUpdate(status="handled"), db_session)
+
+    assert updated.status == "handled"
+    assert updated.is_read is True

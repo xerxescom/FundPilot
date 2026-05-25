@@ -1,11 +1,65 @@
 <template>
   <PageSkeleton v-if="loading && !data" />
-  <div v-else v-loading="loading" element-loading-text="正在刷新首页数据...">
+  <div v-else v-loading="loading" element-loading-text="正在刷新今日驾驶舱...">
     <div class="metric-grid">
       <MetricCard label="自选基金" :value="data?.watchlist_count ?? 0" />
-      <MetricCard label="最高评分" :value="scoreText(bestScore?.total_score)" :hint="bestScore?.rating || '暂无'" />
+      <MetricCard label="待办事项" :value="todos.length" />
       <MetricCard label="未读预警" :value="alerts.length" />
-      <MetricCard label="最近简报" :value="latestReportTime" />
+      <MetricCard label="最新日报" :value="latestReportTime" />
+    </div>
+
+    <div class="section panel">
+      <h2 class="section-title">今日待办</h2>
+      <el-empty v-if="!todos.length" description="暂无待办事项" />
+      <el-table v-else :data="todos" border stripe>
+        <el-table-column label="事项" min-width="180">
+          <template #default="{ row }">
+            <el-tag :type="tagType(row.level)" effect="plain">{{ row.title }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="说明" min-width="280" />
+        <el-table-column label="操作" width="160">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="go(row.route)">去处理</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <div class="section two-col">
+      <div class="panel">
+        <h2 class="section-title">关键风险</h2>
+        <el-alert
+          v-for="risk in risks"
+          :key="risk.title"
+          class="alert-item"
+          :type="tagType(risk.level)"
+          :closable="false"
+          :title="risk.title"
+          :description="risk.description"
+        />
+      </div>
+      <div class="panel">
+        <h2 class="section-title">风险预警</h2>
+        <el-alert
+          v-for="alert in alerts.slice(0, 6)"
+          :key="alert.id"
+          class="alert-item"
+          type="warning"
+          :closable="false"
+          :title="alert.title || alert.alert_type"
+          :description="alert.content || ''"
+        >
+          <template #default>
+            <div class="toolbar compact">
+              <el-button size="small" @click="updateAlert(alert.id, 'read')">标为已读</el-button>
+              <el-button size="small" type="success" @click="updateAlert(alert.id, 'handled')">已处理</el-button>
+              <el-button size="small" @click="updateAlert(alert.id, 'ignored')">忽略</el-button>
+            </div>
+          </template>
+        </el-alert>
+        <el-empty v-if="!alerts.length" description="暂无未读风险提醒" />
+      </div>
     </div>
 
     <div class="section panel">
@@ -27,34 +81,6 @@
       </el-table>
     </div>
 
-    <div class="section two-col">
-      <div class="panel">
-        <h2 class="section-title">推荐关注 Top 5</h2>
-        <el-table :data="data?.top_scores || []" border stripe>
-          <el-table-column prop="fund_code" label="基金代码" />
-          <el-table-column prop="fund_name" label="基金名称" min-width="160" />
-          <el-table-column label="总分">
-            <template #default="{ row }">{{ scoreText(row.total_score) }}</template>
-          </el-table-column>
-          <el-table-column prop="rating" label="评级" />
-          <el-table-column prop="reason" label="理由" min-width="260" />
-        </el-table>
-      </div>
-      <div class="panel">
-        <h2 class="section-title">风险提醒</h2>
-        <el-alert
-          v-for="alert in alerts.slice(0, 6)"
-          :key="alert.id"
-          class="alert-item"
-          type="warning"
-          :closable="false"
-          :title="alert.title || alert.alert_type"
-          :description="alert.content || ''"
-        />
-        <el-empty v-if="!alerts.length" description="暂无未读风险提醒" />
-      </div>
-    </div>
-
     <div v-if="data?.latest_report" class="section">
       <ReportCard :report="data.latest_report" />
     </div>
@@ -67,7 +93,7 @@
           :key="item.index_code"
           :label="item.index_name"
           :value="pct(item.daily_return)"
-          :hint="`近1月 ${pct(item.return_1m)}`"
+          :hint="`近 1 月 ${pct(item.return_1m)}`"
         />
       </div>
     </div>
@@ -75,46 +101,59 @@
 </template>
 
 <script setup lang="ts">
+import { ElMessage } from "element-plus";
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 
 import { api } from "../api/fundpilot";
-import { dateText, pct, scoreText } from "../api/format";
-import type { Alert, DataHealth, MarketContext, Report } from "../api/types";
+import { dateText, pct } from "../api/format";
+import type { Alert, DashboardTodo, DataHealth, MarketContext, Report, RiskItem } from "../api/types";
 import MetricCard from "../components/MetricCard.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
 import ReportCard from "../components/ReportCard.vue";
 
-interface DashboardScore {
-  fund_code: string;
-  fund_name?: string | null;
-  total_score?: number | null;
-  rating?: string | null;
-  reason?: string | null;
-  score_date?: string | null;
-}
-
-interface DashboardData {
+interface DashboardToday {
   watchlist_count: number;
-  top_scores: DashboardScore[];
+  todos: DashboardTodo[];
+  key_risks: RiskItem[];
   unread_alerts: Alert[];
   latest_report?: Report | null;
   market_context: MarketContext[];
   data_health: DataHealth;
 }
 
+const router = useRouter();
 const loading = ref(false);
-const data = ref<DashboardData | null>(null);
+const data = ref<DashboardToday | null>(null);
 const health = computed(() => data.value?.data_health);
+const todos = computed(() => data.value?.todos || []);
 const alerts = computed(() => data.value?.unread_alerts || []);
+const risks = computed(() => data.value?.key_risks || []);
 const markets = computed(() => data.value?.market_context || []);
-const bestScore = computed<DashboardScore | undefined>(() => data.value?.top_scores?.[0]);
 const latestReportTime = computed(() => data.value?.latest_report?.created_at?.slice(0, 16) || "暂无");
 const problemRows = computed(() => (health.value?.funds || []).filter((item) => (item.issues as unknown[])?.length));
+
+function tagType(level: string) {
+  if (level === "danger") return "error";
+  if (level === "warning" || level === "medium") return "warning";
+  if (level === "success" || level === "info") return "success";
+  return "info";
+}
+
+function go(route: string) {
+  router.push(route);
+}
+
+async function updateAlert(id: number, status: string) {
+  await api.updateAlert(id, status);
+  ElMessage.success("预警状态已更新");
+  await load();
+}
 
 async function load() {
   loading.value = true;
   try {
-    data.value = (await api.dashboard()) as DashboardData;
+    data.value = (await api.dashboardToday()) as DashboardToday;
   } finally {
     loading.value = false;
   }
@@ -126,5 +165,9 @@ onMounted(load);
 <style scoped>
 .alert-item + .alert-item {
   margin-top: 10px;
+}
+
+.compact {
+  margin: 8px 0 0;
 }
 </style>

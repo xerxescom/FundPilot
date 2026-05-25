@@ -1,5 +1,5 @@
 <template>
-  <div v-loading="loading">
+  <div v-loading="loading" element-loading-text="正在更新持仓和组合诊断...">
     <div class="panel">
       <h2 class="section-title">新增买入记录</h2>
       <el-form :model="transaction" inline>
@@ -17,6 +17,26 @@
       <MetricCard label="投入成本" :value="money(overview?.total_cost)" />
       <MetricCard label="收益金额" :value="money(overview?.profit_amount)" />
       <MetricCard label="收益率" :value="pct(overview?.profit_rate)" />
+    </div>
+
+    <div class="section panel">
+      <h2 class="section-title">组合诊断</h2>
+      <div class="metric-grid">
+        <MetricCard label="持仓数量" :value="diagnosis?.summary.position_count ?? 0" />
+        <MetricCard label="最大持仓占比" :value="pct(diagnosis?.summary.max_weight)" />
+        <MetricCard label="近 1 月回撤" :value="pct(diagnosis?.summary.drawdown_1m)" />
+        <MetricCard label="组合收益率" :value="pct(diagnosis?.summary.profit_rate)" />
+      </div>
+      <el-alert
+        v-for="risk in diagnosis?.risk_items || []"
+        :key="risk.title"
+        class="alert-item"
+        :type="risk.level === 'medium' ? 'warning' : 'info'"
+        :closable="false"
+        :title="risk.title"
+        :description="risk.description"
+      />
+      <p class="muted">{{ diagnosis?.observation }}</p>
     </div>
 
     <div class="section two-col">
@@ -68,12 +88,13 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "../api/fundpilot";
 import { money, pct } from "../api/format";
-import type { PortfolioOverview } from "../api/types";
+import type { PortfolioDiagnosis, PortfolioOverview } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import MetricCard from "../components/MetricCard.vue";
 
 const loading = ref(false);
 const overview = ref<PortfolioOverview | null>(null);
+const diagnosis = ref<PortfolioDiagnosis | null>(null);
 const transactions = ref<unknown[]>([]);
 const transaction = reactive({ fund_code: "", trade_date: "", amount: 0, nav: 0, fee: 0 });
 
@@ -100,7 +121,16 @@ const pieOption = computed<EChartsOption>(() => ({
 }));
 
 async function load() {
-  [overview.value, transactions.value] = await Promise.all([api.portfolioOverview(), api.portfolioTransactions()]);
+  loading.value = true;
+  try {
+    [overview.value, transactions.value, diagnosis.value] = await Promise.all([
+      api.portfolioOverview(),
+      api.portfolioTransactions(),
+      api.portfolioDiagnosis() as Promise<PortfolioDiagnosis>,
+    ]);
+  } finally {
+    loading.value = false;
+  }
 }
 
 async function addTransaction() {
@@ -126,3 +156,9 @@ async function deletePosition(id: number) {
 
 onMounted(load);
 </script>
+
+<style scoped>
+.alert-item {
+  margin-top: 10px;
+}
+</style>

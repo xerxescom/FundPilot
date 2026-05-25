@@ -7,7 +7,7 @@ from app.db.session import get_db
 from app.schemas.fund import FundInfoOut, FundNavOut
 from app.schemas.indicator import IndicatorOut
 from app.schemas.score import ScoreOut
-from app.services import indicator_service, nav_service, research_service, score_service
+from app.services import fund_analysis_service, indicator_service, nav_service, research_service, score_service
 
 router = APIRouter()
 recommendation_router = APIRouter()
@@ -44,6 +44,16 @@ def sync_nav(fund_code: str, db: Session = Depends(get_db)):
 def retry_sync_nav(fund_code: str, db: Session = Depends(get_db)):
     count = nav_service.sync_fund_nav(db, fund_code)
     return {"fund_code": fund_code.zfill(6), "synced_rows": count, "status": "success"}
+
+
+@router.get("/{fund_code}/analysis-status")
+def get_analysis_status(fund_code: str, db: Session = Depends(get_db)):
+    return fund_analysis_service.analysis_status(db, fund_code)
+
+
+@router.post("/{fund_code}/analyze")
+def analyze_fund(fund_code: str, db: Session = Depends(get_db)):
+    return fund_analysis_service.analyze_fund(db, fund_code)
 
 
 @router.post("/{fund_code}/calc-indicators", response_model=IndicatorOut)

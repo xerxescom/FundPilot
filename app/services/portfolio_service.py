@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.db.models import FundNav, PortfolioPosition, PortfolioTransaction
 from app.services.nav_service import latest_nav
 
+AUTO_SUMMARY_NOTE = "由买入记录自动汇总"
+
 
 def create_position(db: Session, data: dict) -> PortfolioPosition:
     position = PortfolioPosition(**data)
@@ -42,7 +44,7 @@ def _rebuild_position_from_transactions(db: Session, fund_code: str) -> Portfoli
         "holding_share": _quantize(total_share, "0.0001"),
         "cost_nav": _quantize(cost_nav, "0.000001") if cost_nav else None,
         "buy_date": transactions[0].trade_date,
-        "note": "由买入记录自动汇总",
+        "note": AUTO_SUMMARY_NOTE,
     }
     if position:
         for key, value in values.items():
@@ -99,7 +101,7 @@ def delete_transaction(db: Session, transaction_id: int) -> bool:
     rebuilt = _rebuild_position_from_transactions(db, fund_code)
     if rebuilt is None:
         position = db.scalar(select(PortfolioPosition).where(PortfolioPosition.fund_code == fund_code))
-        if position and position.note == "由买入记录自动汇总":
+        if position and position.note == AUTO_SUMMARY_NOTE:
             db.delete(position)
             db.commit()
     return True
@@ -209,3 +211,57 @@ def portfolio_drawdown_1m(db: Session) -> Decimal | None:
         return None
     drawdown = one_month / one_month.cummax() - 1
     return Decimal(str(float(drawdown.min()))).quantize(Decimal("0.000001"))
+
+
+def portfolio_diagnosis(db: Session) -> dict:
+    overview = portfolio_overview(db)
+    positions = overview["positions"]
+    max_weight = overview["max_weight"]
+    drawdown_1m = overview["drawdown_1m"]
+    risk_items = []
+    stale_positions = [item for item in positions if item["latest_nav"] is None]
+
+    if max_weight is not None and max_weight >= Decimal("0.30"):
+        risk_items.append(
+            {
+                "level": "medium",
+                "title": "持仓集中度偏高",
+                "description": f"单只基金估算占比达到 {max_weight:.2%}，建议重点观察该基金波动对组合的影响。",
+            }
+        )
+    if drawdown_1m is not None and drawdown_1m <= Decimal("-0.08"):
+        risk_items.append(
+            {
+                "level": "medium",
+                "title": "组合近 1 月回撤较大",
+                "description": f"组合近 1 月估算最大回撤为 {drawdown_1m:.2%}，建议结合市场环境复盘。",
+            }
+        )
+    if stale_positions:
+        risk_items.append(
+            {
+                "level": "low",
+                "title": "部分持仓缺少最新净值",
+                "description": f"{len(stale_positions)} 只持仓暂时无法估算最新市值，请先同步净值。",
+            }
+        )
+    if not risk_items:
+        risk_items.append(
+            {
+                "level": "info",
+                "title": "暂无突出组合风险",
+                "description": "当前组合未触发集中度、回撤或净值缺失规则，仍建议持续观察评分和预警变化。",
+            }
+        )
+
+    return {
+        "summary": {
+            "position_count": len(positions),
+            "total_value": overview["total_value"],
+            "profit_rate": overview["profit_rate"],
+            "max_weight": max_weight,
+            "drawdown_1m": drawdown_1m,
+        },
+        "risk_items": risk_items,
+        "observation": "组合诊断仅用于风险观察和复盘，不构成买入或卖出建议。",
+    }

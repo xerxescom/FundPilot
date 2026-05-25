@@ -1,4 +1,4 @@
-import { deleteJson, getJson, postJson, putJson } from "./client";
+import { deleteJson, getJson, patchJson, postJson, putJson } from "./client";
 import type {
   Alert,
   DataHealth,
@@ -13,11 +13,14 @@ import type {
 
 export const api = {
   dashboard: () => getJson<unknown>("/dashboard/overview"),
+  dashboardToday: () => getJson<unknown>("/dashboard/today"),
   watchlist: () => getJson<WatchlistItem[]>("/watchlist"),
   addWatchlist: (data: Record<string, unknown>) => postJson<WatchlistItem>("/watchlist", data),
   removeWatchlist: (code: string) => deleteJson(`/watchlist/${code}`),
   syncWatchlistNav: () => postJson<Record<string, string | number>>("/watchlist/sync-nav"),
   syncFundNav: (code: string) => postJson<{ fund_code: string; synced_rows: number }>(`/funds/${code}/sync-nav`),
+  analyzeFund: (code: string) => postJson<unknown>(`/funds/${code}/analyze`),
+  analysisStatus: (code: string) => getJson<unknown>(`/funds/${code}/analysis-status`),
   nav: (code: string) => getJson<FundNav[]>(`/funds/${code}/nav`),
   calcIndicators: (code: string) => postJson<Indicator>(`/funds/${code}/calc-indicators`),
   indicators: (code: string) => getJson<Indicator>(`/funds/${code}/indicators`),
@@ -31,7 +34,9 @@ export const api = {
   syncMarket: () => postJson<unknown>("/market/sync"),
   alerts: () => getJson<Alert[]>("/alerts/unread"),
   generateAlerts: () => postJson<Alert[]>("/alerts/generate"),
+  updateAlert: (id: number, status: string) => patchJson<Alert>(`/alerts/${id}`, { status }),
   portfolioOverview: () => getJson<PortfolioOverview>("/portfolio/overview"),
+  portfolioDiagnosis: () => getJson<unknown>("/portfolio/diagnosis"),
   portfolioTransactions: () => getJson<unknown[]>("/portfolio/transactions"),
   addTransaction: (data: Record<string, unknown>) => postJson<unknown>("/portfolio/transactions", data),
   deleteTransaction: (id: number) => deleteJson(`/portfolio/transactions/${id}`),

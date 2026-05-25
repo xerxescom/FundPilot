@@ -12,5 +12,10 @@ class AlertOut(BaseModel):
     alert_level: str | None = None
     title: str | None = None
     content: str | None = None
+    status: str = "unread"
     is_read: bool
     created_at: datetime
+
+
+class AlertUpdate(BaseModel):
+    status: str

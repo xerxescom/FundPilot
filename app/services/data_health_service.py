@@ -24,9 +24,7 @@ def _latest_indicator_date(db: Session, fund_code: str) -> date | None:
 
 def _nav_dates(db: Session, fund_code: str) -> list[date]:
     return list(
-        db.scalars(
-            select(FundNav.nav_date).where(FundNav.fund_code == fund_code).order_by(FundNav.nav_date.asc())
-        )
+        db.scalars(select(FundNav.nav_date).where(FundNav.fund_code == fund_code).order_by(FundNav.nav_date.asc()))
     )
 
 

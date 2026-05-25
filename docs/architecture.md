@@ -1,45 +1,36 @@
-# FundPilot 技术架构
+# 技术架构
 
-FundPilot 是一个本地单用户基金投研助手，核心由 Vue、FastAPI、SQLAlchemy、PostgreSQL、Pandas、APScheduler 和 Ollama 组成。
+FundPilot 采用本地单用户架构，前端负责交互，后端负责业务计算和数据持久化。
 
-## 架构图
+## 分层
+
+- Vue 前端：展示今日驾驶舱、自选基金、基金详情、组合持仓、相关性、AI 简报和任务中心。
+- FastAPI：提供 `/api/v1/*` 结构化接口，保持前端调用稳定。
+- Service 层：承载净值同步、指标计算、规则评分、组合诊断、预警生成、相关性和 AI 报告逻辑。
+- 数据源层：封装 AKShare 和 Eastmoney，降低外部数据字段变化对业务逻辑的影响。
+- 数据库：PostgreSQL 保存基金、净值、指标、评分、持仓、预警、AI 报告和任务日志。
+- 任务层：APScheduler 可选启用；本地演示和开发优先使用手动任务。
+
+## 数据流
 
 ```mermaid
-flowchart TB
-    User["用户"] --> Vue["Vue 3 前端工作台"]
+flowchart TD
+    User["用户"] --> Vue["Vue 工作台"]
     Vue --> API["FastAPI /api/v1"]
-    API --> Services["app/services 业务服务层"]
+    API --> Services["业务服务"]
     Services --> DB[("PostgreSQL")]
-    Services --> DataSource["AKShare / Eastmoney"]
-    Services --> AI["Ollama / 规则兜底"]
-    Scheduler["APScheduler 定时任务"] --> Services
-    Scripts["scripts 手动任务"] --> Services
+    Services --> Source["AKShare / Eastmoney"]
+    Services --> AI["Ollama 或规则兜底"]
 ```
 
-## 模块职责
+## 关键闭环
 
-- `frontend`：Vue 3 + TypeScript + Element Plus + ECharts，承担所有前端交互。
-- `app/api/v1`：结构化 HTTP API，供 Vue 调用。
-- `app/services`：业务逻辑，包括净值同步、指标计算、评分、持仓、预警、相关性、数据健康、AI 报告。
-- `app/data_source`：基金和市场数据源，以 AKShare 为主，Eastmoney 作为备用与对账来源。
-- `app/db`：SQLAlchemy session、ORM 模型和基础声明。
-- `app/jobs`：可选定时任务，默认关闭，设置 `ENABLE_SCHEDULER=true` 后由 FastAPI lifespan 启动。
-- `scripts`：命令行任务入口，用于本地调试、回填、演示和 smoke check。
+1. 添加自选基金。
+2. 一键同步并分析：同步净值、计算指标、生成评分、生成基金解释。
+3. 今日驾驶舱聚合待办、风险、预警、市场和日报。
+4. 持仓页用真实持仓生成组合诊断。
+5. AI 简报把结构化数据总结为每日复盘。
 
-## 核心数据流
+## 边界
 
-```text
-watchlist -> sync nav -> fund_nav -> indicators -> scores -> Vue/report
-market indexes -> market_index_daily -> market context -> Vue/report
-portfolio_position + latest nav -> portfolio overview -> alerts/report
-fund_nav daily_return -> correlation -> duplicate allocation alerts
-task execution -> task_run_log -> task center
-```
-
-## 启动边界
-
-开发环境可以通过 `AUTO_CREATE_TABLES=true` 快速建表；正式交付建议先运行 Alembic 迁移。定时任务默认关闭，避免本地调试时意外触发外部数据抓取。
-
-## 产品边界
-
-系统只做本地数据监控、规则评分和解释性总结，不提供直接买卖建议。AI 只读取结构化数据，不自由联网搜索。
+系统只做数据监控、规则评分、风险提示和解释性总结，不提供直接买卖建议。AI 只读取本地结构化数据，不自由联网搜索。

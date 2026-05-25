@@ -46,7 +46,7 @@ import { computed } from "vue";
 import { useRoute } from "vue-router";
 
 const navItems = [
-  { path: "/", label: "首页概览", icon: HomeFilled },
+  { path: "/", label: "今日驾驶舱", icon: HomeFilled },
   { path: "/data-health", label: "数据质量", icon: DataAnalysis },
   { path: "/market", label: "市场概览", icon: DataLine },
   { path: "/watchlist", label: "自选基金", icon: List },

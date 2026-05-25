@@ -33,6 +33,11 @@ export async function putJson<T>(url: string, data?: unknown): Promise<T> {
   return response.data;
 }
 
+export async function patchJson<T>(url: string, data?: unknown): Promise<T> {
+  const response = await apiClient.patch<T>(url, data);
+  return response.data;
+}
+
 export async function deleteJson<T>(url: string): Promise<T> {
   const response = await apiClient.delete<T>(url);
   return response.data;

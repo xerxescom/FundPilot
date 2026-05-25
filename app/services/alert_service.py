@@ -25,6 +25,7 @@ def _upsert_alert(
     if existing:
         existing.content = content
         existing.alert_level = level
+        existing.status = existing.status or "unread"
         alert = existing
     else:
         alert = AlertEvent(
@@ -33,6 +34,7 @@ def _upsert_alert(
             alert_level=level,
             title=title,
             content=content,
+            status="unread",
         )
         db.add(alert)
     db.commit()
@@ -69,7 +71,7 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
                 indicator.fund_code,
                 "medium",
                 f"{indicator.fund_code} 回撤超过阈值",
-                f"近1年最大回撤为 {indicator.max_drawdown_1y}",
+                f"近 1 年最大回撤为 {indicator.max_drawdown_1y}",
             )
         )
 
@@ -116,8 +118,8 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
                 "portfolio_drawdown",
                 None,
                 "medium",
-                "组合近1月回撤超过 8%",
-                f"当前估算近1月组合最大回撤为 {drawdown_1m:.2%}",
+                "组合近 1 月回撤超过 8%",
+                f"当前估算近 1 月组合最大回撤为 {drawdown_1m:.2%}",
             )
         )
     return alerts
@@ -125,5 +127,22 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
 
 def unread_alerts(db: Session) -> list[AlertEvent]:
     return list(
-        db.scalars(select(AlertEvent).where(AlertEvent.is_read.is_(False)).order_by(AlertEvent.created_at.desc()))
+        db.scalars(
+            select(AlertEvent)
+            .where(AlertEvent.status == "unread", AlertEvent.is_read.is_(False))
+            .order_by(AlertEvent.created_at.desc())
+        )
     )
+
+
+def update_alert_status(db: Session, alert_id: int, status: str) -> AlertEvent | None:
+    if status not in {"unread", "read", "handled", "ignored"}:
+        raise ValueError("status must be one of unread, read, handled, ignored")
+    alert = db.get(AlertEvent, alert_id)
+    if not alert:
+        return None
+    alert.status = status
+    alert.is_read = status != "unread"
+    db.commit()
+    db.refresh(alert)
+    return alert

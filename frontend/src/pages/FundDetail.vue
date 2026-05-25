@@ -13,12 +13,28 @@
 
     <PageSkeleton v-if="loading && !hasLoadedOnce" class="section" />
 
-    <div
-      v-else-if="fundCode"
-      v-loading="loading || busy"
-      :element-loading-text="loadingText"
-      class="fund-detail-body"
-    >
+    <div v-else-if="fundCode" v-loading="loading || busy" :element-loading-text="loadingText" class="fund-detail-body">
+      <div v-if="status" class="section panel">
+        <h2 class="section-title">基金档案</h2>
+        <div class="metric-grid">
+          <MetricCard label="基金名称" :value="status.fund_name || fundCode" />
+          <MetricCard label="分析状态" :value="status.status_label" :hint="status.data_status" />
+          <MetricCard label="最新净值" :value="status.latest_nav ?? '暂无'" :hint="dateText(status.latest_nav_date)" />
+          <MetricCard label="当前评级" :value="status.rating || '暂无'" :hint="scoreText(status.latest_score)" />
+        </div>
+        <el-steps class="section" :active="activeStep" finish-status="success" simple>
+          <el-step v-for="step in status.steps" :key="step.key" :title="step.label" />
+        </el-steps>
+        <el-alert
+          v-if="status.score_reason"
+          class="section"
+          type="info"
+          :closable="false"
+          title="评分原因"
+          :description="status.score_reason"
+        />
+      </div>
+
       <el-alert
         v-if="needsFullAnalysis"
         class="section"
@@ -26,7 +42,7 @@
         :closable="false"
         show-icon
         title="这只基金还没有完成同步分析"
-        description="当前基金已加入自选，但缺少净值、指标或评分数据。请点击“一键同步并分析”完成数据同步、指标计算和评分生成后再查看详情。"
+        description="当前基金缺少净值、指标或评分数据。请点击“一键同步并分析”完成数据同步、指标计算、评分生成和基金解释后再查看详情。"
       />
 
       <div v-if="needsFullAnalysis" class="section panel empty-action">
@@ -37,8 +53,8 @@
 
       <template v-else>
         <div class="section metric-grid">
-          <MetricCard label="近1月收益" :value="pct(indicator?.return_1m)" />
-          <MetricCard label="近1年收益" :value="pct(indicator?.return_1y)" />
+          <MetricCard label="近 1 月收益" :value="pct(indicator?.return_1m)" />
+          <MetricCard label="近 1 年收益" :value="pct(indicator?.return_1y)" />
           <MetricCard label="最大回撤" :value="pct(indicator?.max_drawdown_1y)" />
           <MetricCard label="评分" :value="scoreText(score?.total_score)" :hint="score?.rating" />
         </div>
@@ -76,8 +92,8 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import { api } from "../api/fundpilot";
-import { pct, scoreText } from "../api/format";
-import type { FundNav, Indicator, Score, WatchlistItem } from "../api/types";
+import { dateText, pct, scoreText } from "../api/format";
+import type { AnalysisStatus, FundNav, Indicator, Score, WatchlistItem } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import ChartSkeleton from "../components/ChartSkeleton.vue";
 import FundSelector from "../components/FundSelector.vue";
@@ -96,11 +112,13 @@ const actionLoading = ref<ActionLoading>(null);
 const navRows = ref<FundNav[]>([]);
 const indicator = ref<Indicator | null>(null);
 const score = ref<Score | null>(null);
+const status = ref<AnalysisStatus | null>(null);
 const fundCode = computed(() => (manualCode.value || selected.value || String(route.params.fundCode || "")).trim());
 const needsFullAnalysis = computed(() => !navRows.value.length || !indicator.value || !score.value);
 const busy = computed(() => actionLoading.value !== null);
+const activeStep = computed(() => status.value?.steps.filter((step) => step.done).length || 0);
 const loadingText = computed(() => {
-  if (actionLoading.value === "analyze") return "正在同步净值、计算指标并生成评分...";
+  if (actionLoading.value === "analyze") return "正在同步净值、计算指标、生成评分和基金解释...";
   if (actionLoading.value === "sync") return "正在同步净值数据...";
   if (actionLoading.value === "indicator") return "正在计算指标...";
   if (actionLoading.value === "score") return "正在计算评分...";
@@ -120,9 +138,9 @@ const navOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: "axis" },
   legend: { top: 0 },
   grid: [
-    { top: 44, left: 58, right: 32, height: 86, containLabel: true },
-    { top: 174, left: 58, right: 32, height: 86, containLabel: true },
-    { top: 304, left: 58, right: 32, bottom: 36, containLabel: true },
+    { top: 44, left: 68, right: 42, height: 86, containLabel: true },
+    { top: 174, left: 68, right: 42, height: 86, containLabel: true },
+    { top: 304, left: 68, right: 42, bottom: 36, containLabel: true },
   ],
   xAxis: [
     { type: "category", data: navRows.value.map((row) => row.nav_date) },
@@ -146,6 +164,7 @@ async function loadFund() {
   if (!fundCode.value) return;
   loading.value = true;
   try {
+    status.value = (await api.analysisStatus(fundCode.value).catch(() => null)) as AnalysisStatus | null;
     navRows.value = await api.nav(fundCode.value);
     indicator.value = await api.indicators(fundCode.value).catch(() => null);
     score.value = await api.score(fundCode.value).catch(() => null);
@@ -178,6 +197,7 @@ async function calcIndicators() {
   await runAction("indicator", async () => {
     indicator.value = await api.calcIndicators(fundCode.value);
     ElMessage.success("指标已更新");
+    await loadFund();
   });
 }
 
@@ -186,18 +206,16 @@ async function calcScore() {
   await runAction("score", async () => {
     score.value = await api.calcScore(fundCode.value);
     ElMessage.success("评分已更新");
+    await loadFund();
   });
 }
 
 async function analyze() {
   if (!fundCode.value) return;
   await runAction("analyze", async () => {
-    await api.syncFundNav(fundCode.value);
-    indicator.value = await api.calcIndicators(fundCode.value);
-    score.value = await api.calcScore(fundCode.value);
-    navRows.value = await api.nav(fundCode.value);
-    hasLoadedOnce.value = true;
+    await api.analyzeFund(fundCode.value);
     ElMessage.success("同步分析完成");
+    await loadFund();
   });
 }
 

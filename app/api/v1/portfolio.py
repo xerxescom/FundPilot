@@ -56,6 +56,11 @@ def portfolio_overview(db: Session = Depends(get_db)):
     return portfolio_service.portfolio_overview(db)
 
 
+@router.get("/diagnosis")
+def portfolio_diagnosis(db: Session = Depends(get_db)):
+    return portfolio_service.portfolio_diagnosis(db)
+
+
 @router.get("/correlation")
 def portfolio_correlation(db: Session = Depends(get_db)):
     corr = correlation_service.calculate_correlation(db)

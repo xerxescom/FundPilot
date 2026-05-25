@@ -8,6 +8,7 @@ export interface WatchlistItem {
   group_name: string;
   note?: Nullable<string>;
   is_active: boolean;
+  analysis_status?: AnalysisStatus;
 }
 
 export interface Score {
@@ -31,8 +32,61 @@ export interface Alert {
   alert_level?: Nullable<string>;
   title?: Nullable<string>;
   content?: Nullable<string>;
+  status: string;
   is_read: boolean;
   created_at: string;
+}
+
+export interface AnalysisStep {
+  key: string;
+  label: string;
+  done: boolean;
+}
+
+export interface AnalysisStatus {
+  fund_code: string;
+  fund_name?: Nullable<string>;
+  fund_type?: Nullable<string>;
+  latest_nav_date?: Nullable<string>;
+  latest_nav?: Nullable<number>;
+  latest_indicator_date?: Nullable<string>;
+  latest_score?: Nullable<number>;
+  rating?: Nullable<string>;
+  score_reason?: Nullable<string>;
+  latest_report_at?: Nullable<string>;
+  data_status: string;
+  data_issues: string[];
+  status: string;
+  status_label: string;
+  steps: AnalysisStep[];
+  complete: boolean;
+}
+
+export interface DashboardTodo {
+  key: string;
+  title: string;
+  description: string;
+  action: string;
+  route: string;
+  level: "success" | "warning" | "info" | "danger";
+}
+
+export interface RiskItem {
+  level: string;
+  title: string;
+  description: string;
+}
+
+export interface PortfolioDiagnosis {
+  summary: {
+    position_count: number;
+    total_value?: Nullable<number>;
+    profit_rate?: Nullable<number>;
+    max_weight?: Nullable<number>;
+    drawdown_1m?: Nullable<number>;
+  };
+  risk_items: RiskItem[];
+  observation: string;
 }
 
 export interface Report {
