@@ -9,6 +9,22 @@
     </div>
 
     <div class="section panel">
+      <h2 class="section-title">评分信号概览</h2>
+      <div class="metric-grid">
+        <MetricCard label="已评分基金" :value="scoreSummary?.total_scored ?? 0" />
+        <MetricCard label="窗口较好" :value="scoreSummary?.favorable_count ?? 0" />
+        <MetricCard label="可以观察" :value="scoreSummary?.watch_count ?? 0" />
+        <MetricCard label="谨慎/等待" :value="scoreSummary?.cautious_count ?? 0" />
+      </div>
+      <div v-if="scoreSummary?.top_risks.length" class="risk-chip-row">
+        <el-tag v-for="risk in scoreSummary.top_risks" :key="risk.label" type="warning" effect="light">
+          {{ risk.label }} {{ risk.count }}
+        </el-tag>
+      </div>
+      <el-empty v-else class="compact-empty" description="暂无评分风险标签" />
+    </div>
+
+    <div class="section panel">
       <h2 class="section-title">今日待办</h2>
       <el-empty v-if="!todos.length" description="暂无待办事项" />
       <el-table v-else :data="todos" border stripe>
@@ -108,7 +124,7 @@ import { useRouter } from "vue-router";
 
 import { api } from "../api/fundpilot";
 import { dateText, pct } from "../api/format";
-import type { Alert, DashboardTodo, DataHealth, MarketContext, Report, RiskItem } from "../api/types";
+import type { Alert, DashboardTodo, DataHealth, MarketContext, Report, RiskItem, ScoreSignalSummary } from "../api/types";
 import MetricCard from "../components/MetricCard.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
 import ReportCard from "../components/ReportCard.vue";
@@ -121,6 +137,7 @@ interface DashboardToday {
   latest_report?: Report | null;
   market_context: MarketContext[];
   data_health: DataHealth;
+  score_summary?: ScoreSignalSummary;
 }
 
 const router = useRouter();
@@ -131,6 +148,7 @@ const todos = computed(() => data.value?.todos || []);
 const alerts = computed(() => data.value?.unread_alerts || []);
 const risks = computed(() => data.value?.key_risks || []);
 const markets = computed(() => data.value?.market_context || []);
+const scoreSummary = computed(() => data.value?.score_summary);
 const latestReportTime = computed(() => data.value?.latest_report?.created_at?.slice(0, 16) || "暂无");
 const problemRows = computed(() => (health.value?.funds || []).filter((item) => (item.issues as unknown[])?.length));
 
@@ -170,5 +188,16 @@ onMounted(load);
 
 .compact {
   margin: 8px 0 0;
+}
+
+.risk-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.compact-empty {
+  padding: 8px 0 0;
 }
 </style>

@@ -45,6 +45,7 @@ def dashboard_today(db: Session = Depends(get_db)):
     report = latest_report(db)
     market_context = market_service.latest_market_context(db)
     portfolio = portfolio_service.portfolio_diagnosis(db)
+    score_summary = score_service.score_signal_summary(db)
     todos = []
 
     stale_count = health["stale_fund_count"] + health["failed_fund_count"]
@@ -136,4 +137,5 @@ def dashboard_today(db: Session = Depends(get_db)):
         "latest_report": report,
         "market_context": market_context,
         "portfolio_diagnosis": portfolio,
+        "score_summary": score_summary,
     }

@@ -17,6 +17,11 @@ def score_strategies():
     return score_service.available_strategies()
 
 
+@router.get("/summary")
+def score_signal_summary(db: Session = Depends(get_db)):
+    return score_service.score_signal_summary(db)
+
+
 @router.get("/top")
 def top_scores_by_strategy(
     strategy: str = Query(default="default"),

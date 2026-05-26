@@ -903,3 +903,33 @@ def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 
             }
         )
     return sorted(scored, key=lambda item: item["total_score"] or 0, reverse=True)[:limit]
+
+
+def score_signal_summary(db: Session) -> dict:
+    rows = top_scores_by_strategy(db, strategy="default", limit=200)
+    signal_counts: dict[str, int] = {}
+    confidence_counts: dict[str, int] = {}
+    risk_counts: dict[str, int] = {}
+    for row in rows:
+        signal = row.get("buy_window_signal") or "unknown"
+        confidence = row.get("confidence_level") or "unknown"
+        signal_counts[signal] = signal_counts.get(signal, 0) + 1
+        confidence_counts[confidence] = confidence_counts.get(confidence, 0) + 1
+        labels = row.get("risk_flag_labels") or row.get("risk_flags") or []
+        for label in labels:
+            risk_counts[label] = risk_counts.get(label, 0) + 1
+
+    return {
+        "total_scored": len(rows),
+        "signal_counts": signal_counts,
+        "confidence_counts": confidence_counts,
+        "top_risks": [
+            {"label": label, "count": count}
+            for label, count in sorted(risk_counts.items(), key=lambda item: item[1], reverse=True)[:8]
+        ],
+        "favorable_count": signal_counts.get("favorable", 0),
+        "watch_count": signal_counts.get("watch", 0),
+        "cautious_count": signal_counts.get("cautious", 0)
+        + signal_counts.get("wait_pullback", 0)
+        + signal_counts.get("blocked", 0),
+    }

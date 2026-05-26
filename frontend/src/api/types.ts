@@ -50,6 +50,16 @@ export interface ScoreStrategy {
   scenario: string;
 }
 
+export interface ScoreSignalSummary {
+  total_scored: number;
+  signal_counts: Record<string, number>;
+  confidence_counts: Record<string, number>;
+  top_risks: Array<{ label: string; count: number }>;
+  favorable_count: number;
+  watch_count: number;
+  cautious_count: number;
+}
+
 export interface ScoreTrendRow {
   fund_code: string;
   score_date: string;

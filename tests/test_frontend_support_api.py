@@ -8,7 +8,7 @@ from app.api.v1 import fund as fund_api
 from app.api.v1.fund import get_analysis_status
 from app.api.v1.portfolio import portfolio_diagnosis
 from app.api.v1.report import ollama_status
-from app.api.v1.score import score_strategies, top_scores_by_strategy
+from app.api.v1.score import score_signal_summary, score_strategies, top_scores_by_strategy
 from app.api.v1.research import industry_overview, risk_return_points
 from app.db.models import AlertEvent, FundIndicator, FundNav, FundScore, PortfolioPosition, Watchlist
 from app.schemas.alert import AlertUpdate
@@ -103,6 +103,7 @@ def test_dashboard_today_api_contract(db_session):
     assert any(item["key"] == "score" for item in payload["todos"])
     assert payload["unread_alerts"][0].title == "回撤提醒"
     assert "portfolio_diagnosis" in payload
+    assert "score_summary" in payload
 
 
 def test_analysis_status_api_contract(db_session):
@@ -192,3 +193,29 @@ def test_score_strategy_api_contract(db_session):
     assert "risk_flag_labels" in rows[0]
     assert "peer_group" in rows[0]
     assert "peer_reason" in rows[0]
+
+
+def test_score_summary_api_contract(db_session):
+    db_session.add(
+        FundIndicator(
+            fund_code="000001",
+            calc_date=date.today(),
+            return_1m=Decimal("0.02"),
+            return_3m=Decimal("0.05"),
+            return_6m=Decimal("0.12"),
+            return_1y=Decimal("0.20"),
+            max_drawdown_1y=Decimal("-0.08"),
+            volatility_1y=Decimal("0.12"),
+            sharpe_1y=Decimal("1.2"),
+            win_rate_1y=Decimal("0.56"),
+        )
+    )
+    db_session.add(FundScore(fund_code="000001", score_date=date.today(), total_score=Decimal("85"), rating="重点关注"))
+    db_session.commit()
+
+    payload = score_signal_summary(db_session)
+
+    assert payload["total_scored"] == 1
+    assert "signal_counts" in payload
+    assert "confidence_counts" in payload
+    assert "top_risks" in payload
