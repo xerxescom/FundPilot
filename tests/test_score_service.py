@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.db.models import FundInfo, FundIndicator, FundNav, FundScore, MarketIndexDaily, PortfolioPosition, Watchlist
+from app.services import score_service
 from app.services.score_service import (
     available_strategies,
     score_indicator,
@@ -349,3 +350,43 @@ def test_top_scores_by_strategy_uses_latest_indicators(db_session):
 
     assert growth[0]["fund_code"] == "000001"
     assert steady[0]["fund_code"] == "000002"
+
+
+def test_top_scores_by_strategy_reuses_context(monkeypatch, db_session):
+    today = date.today()
+    db_session.add_all(
+        [
+            FundIndicator(fund_code="000001", calc_date=today, return_1y=Decimal("0.20")),
+            FundIndicator(fund_code="000002", calc_date=today, return_1y=Decimal("0.18")),
+            FundScore(fund_code="000001", score_date=today, total_score=Decimal("80"), rating="可以观察"),
+            FundScore(fund_code="000002", score_date=today, total_score=Decimal("75"), rating="可以观察"),
+        ]
+    )
+    db_session.commit()
+    calls = {"market": 0, "portfolio": 0, "correlation": 0, "peer": 0}
+
+    def fake_market_context(db):
+        calls["market"] += 1
+        return []
+
+    def fake_portfolio_overview(db):
+        calls["portfolio"] += 1
+        return {"total_value": Decimal("0"), "positions": []}
+
+    def fake_high_correlation_pairs(db):
+        calls["correlation"] += 1
+        return []
+
+    def fake_peer_rows(db):
+        calls["peer"] += 1
+        return []
+
+    monkeypatch.setattr(score_service.market_service, "latest_market_context", fake_market_context)
+    monkeypatch.setattr(score_service.portfolio_service, "portfolio_overview", fake_portfolio_overview)
+    monkeypatch.setattr(score_service.correlation_service, "high_correlation_pairs", fake_high_correlation_pairs)
+    monkeypatch.setattr(score_service, "_peer_source_rows", fake_peer_rows)
+
+    rows = top_scores_by_strategy(db_session, strategy="default", limit=10)
+
+    assert len(rows) == 2
+    assert calls == {"market": 1, "portfolio": 1, "correlation": 1, "peer": 1}

@@ -258,9 +258,14 @@ def _market_signal(db: Session) -> dict:
     return {"market_signal": "neutral", "market_reason": "主要指数近1月表现中性，市场环境不构成明显加减分"}
 
 
-def _portfolio_fit(db: Session, fund_code: str) -> dict:
+def _portfolio_fit(
+    db: Session,
+    fund_code: str,
+    portfolio_overview: dict | None = None,
+    high_correlation_pairs: list[dict] | None = None,
+) -> dict:
     fund_code = fund_code.zfill(6)
-    overview = portfolio_service.portfolio_overview(db)
+    overview = portfolio_overview or portfolio_service.portfolio_overview(db)
     total_value = overview["total_value"]
     held_weight = None
     for item in overview["positions"]:
@@ -269,9 +274,8 @@ def _portfolio_fit(db: Session, fund_code: str) -> dict:
             held_weight = float(item["current_value"] / total_value)
             break
 
-    related_pairs = [
-        pair for pair in correlation_service.high_correlation_pairs(db) if fund_code in {pair["fund_a"], pair["fund_b"]}
-    ]
+    pairs = high_correlation_pairs if high_correlation_pairs is not None else correlation_service.high_correlation_pairs(db)
+    related_pairs = [pair for pair in pairs if fund_code in {pair["fund_a"], pair["fund_b"]}]
     score = 85
     reasons: list[str] = []
     flags: list[str] = []
@@ -324,7 +328,34 @@ def _percentile_rank(values: list[float], value: float, higher_is_better: bool =
     return better_or_equal / len(values)
 
 
-def _peer_comparison(db: Session, fund_code: str, indicator: FundIndicator | None, fund: FundInfo | None) -> dict:
+def _peer_source_rows(db: Session) -> list:
+    latest_indicator_sq = (
+        select(FundIndicator.fund_code, func.max(FundIndicator.calc_date).label("latest_date"))
+        .group_by(FundIndicator.fund_code)
+        .subquery()
+    )
+    return db.execute(
+        select(FundIndicator, FundInfo, Watchlist)
+        .join(
+            latest_indicator_sq,
+            (FundIndicator.fund_code == latest_indicator_sq.c.fund_code)
+            & (FundIndicator.calc_date == latest_indicator_sq.c.latest_date),
+        )
+        .outerjoin(FundInfo, FundInfo.fund_code == FundIndicator.fund_code)
+        .outerjoin(
+            Watchlist,
+            (Watchlist.fund_code == FundIndicator.fund_code) & (Watchlist.is_active.is_(True)),
+        )
+    ).all()
+
+
+def _peer_comparison(
+    db: Session,
+    fund_code: str,
+    indicator: FundIndicator | None,
+    fund: FundInfo | None,
+    peer_rows: list | None = None,
+) -> dict:
     fund_code = fund_code.zfill(6)
     watchlist = db.scalar(
         select(Watchlist)
@@ -342,24 +373,7 @@ def _peer_comparison(db: Session, fund_code: str, indicator: FundIndicator | Non
             "peer_risk_flags": ["peer_indicator_missing"],
         }
 
-    latest_indicator_sq = (
-        select(FundIndicator.fund_code, func.max(FundIndicator.calc_date).label("latest_date"))
-        .group_by(FundIndicator.fund_code)
-        .subquery()
-    )
-    rows = db.execute(
-        select(FundIndicator, FundInfo, Watchlist)
-        .join(
-            latest_indicator_sq,
-            (FundIndicator.fund_code == latest_indicator_sq.c.fund_code)
-            & (FundIndicator.calc_date == latest_indicator_sq.c.latest_date),
-        )
-        .outerjoin(FundInfo, FundInfo.fund_code == FundIndicator.fund_code)
-        .outerjoin(
-            Watchlist,
-            (Watchlist.fund_code == FundIndicator.fund_code) & (Watchlist.is_active.is_(True)),
-        )
-    ).all()
+    rows = peer_rows if peer_rows is not None else _peer_source_rows(db)
     peers = [
         peer_indicator
         for peer_indicator, peer_fund, peer_watchlist in rows
@@ -747,7 +761,14 @@ def _score_to_dict(score: FundScore, fund_name: str | None = None) -> dict:
     }
 
 
-def score_payload(db: Session, fund_code: str) -> dict | None:
+def score_payload(
+    db: Session,
+    fund_code: str,
+    market: dict | None = None,
+    portfolio_overview: dict | None = None,
+    high_correlation_pairs: list[dict] | None = None,
+    peer_rows: list | None = None,
+) -> dict | None:
     fund_code = fund_code.zfill(6)
     score = latest_score(db, fund_code)
     if not score:
@@ -777,7 +798,12 @@ def score_payload(db: Session, fund_code: str) -> dict | None:
                 "risk_flags": ["indicator_missing"],
             }
         )
-    return _apply_context(payload, _market_signal(db), _portfolio_fit(db, fund_code), _peer_comparison(db, fund_code, indicator, fund))
+    return _apply_context(
+        payload,
+        market or _market_signal(db),
+        _portfolio_fit(db, fund_code, portfolio_overview, high_correlation_pairs),
+        _peer_comparison(db, fund_code, indicator, fund, peer_rows),
+    )
 
 
 def calculate_watchlist_scores(db: Session) -> dict[str, str]:
@@ -816,10 +842,18 @@ def top_scores(db: Session, limit: int = 20) -> list[FundScore]:
 
 
 def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 20) -> list[dict]:
+    market = _market_signal(db)
+    portfolio_overview = portfolio_service.portfolio_overview(db)
+    high_correlation_pairs = correlation_service.high_correlation_pairs(db)
+    peer_rows = _peer_source_rows(db)
+
     if strategy == "default":
         rows = []
         for item in top_scores(db, limit):
-            payload = score_payload(db, item.fund_code) or _score_to_dict(item)
+            payload = (
+                score_payload(db, item.fund_code, market, portfolio_overview, high_correlation_pairs, peer_rows)
+                or _score_to_dict(item)
+            )
             payload.update(
                 {
                     "strategy": "default",
@@ -856,9 +890,9 @@ def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 
         item = score_indicator_with_strategy(indicator, fund, strategy, _nav_stats(db, indicator.fund_code))
         item = _apply_context(
             item,
-            _market_signal(db),
-            _portfolio_fit(db, indicator.fund_code),
-            _peer_comparison(db, indicator.fund_code, indicator, fund),
+            market,
+            _portfolio_fit(db, indicator.fund_code, portfolio_overview, high_correlation_pairs),
+            _peer_comparison(db, indicator.fund_code, indicator, fund, peer_rows),
         )
         scored.append(
             {
