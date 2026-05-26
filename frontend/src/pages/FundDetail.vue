@@ -114,6 +114,16 @@
         </section>
       </div>
 
+      <div v-if="fundReport" class="section">
+        <div class="section-heading-row">
+          <div>
+            <div class="section-eyebrow">AI Analysis</div>
+            <h2 class="section-title">基金诊断解释</h2>
+          </div>
+        </div>
+        <ReportCard :report="fundReport" />
+      </div>
+
       <el-alert
         v-if="needsFullAnalysis"
         class="section"
@@ -247,12 +257,13 @@ import { useRoute } from "vue-router";
 
 import { api } from "../api/fundpilot";
 import { dateText, pct, scoreText } from "../api/format";
-import type { AnalysisStatus, FundNav, Indicator, Score, SyncDiagnostics, WatchlistItem } from "../api/types";
+import type { AnalysisStatus, FundNav, Indicator, Report, Score, SyncDiagnostics, WatchlistItem } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import ChartSkeleton from "../components/ChartSkeleton.vue";
 import FundSelector from "../components/FundSelector.vue";
 import MetricCard from "../components/MetricCard.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
+import ReportCard from "../components/ReportCard.vue";
 
 type ActionLoading = "sync" | "indicator" | "score" | "analyze" | "report" | null;
 
@@ -274,6 +285,7 @@ const indicator = ref<Indicator | null>(null);
 const score = ref<Score | null>(null);
 const status = ref<AnalysisStatus | null>(null);
 const syncDiagnostics = ref<SyncDiagnostics | null>(null);
+const fundReport = ref<Report | null>(null);
 const fundCode = computed(() => (manualCode.value || selected.value || String(route.params.fundCode || "")).trim());
 const needsFullAnalysis = computed(() => !navRows.value.length || !indicator.value || !score.value);
 const busy = computed(() => actionLoading.value !== null);
@@ -365,6 +377,7 @@ async function loadFund() {
     navPage.value = 1;
     indicator.value = await api.indicators(fundCode.value).catch(() => null);
     score.value = await api.score(fundCode.value).catch(() => null);
+    fundReport.value = await api.latestFundReport(fundCode.value).catch(() => null);
     hasLoadedOnce.value = true;
   } finally {
     loading.value = false;
@@ -492,9 +505,8 @@ async function analyze() {
 async function generateReport() {
   if (!fundCode.value) return;
   await runAction("report", async () => {
-    await api.generateFundReport(fundCode.value);
+    fundReport.value = await api.generateFundReport(fundCode.value);
     ElMessage.success("基金解释已生成");
-    await loadFund();
   });
 }
 
