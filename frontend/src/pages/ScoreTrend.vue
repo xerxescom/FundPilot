@@ -35,9 +35,9 @@ const lineOption = computed<EChartsOption>(() => ({
     { type: "value", name: "变化", min: -20, max: 20 },
   ],
   series: [
-    { name: "总分", type: "line", smooth: true, data: rows.value.map((row) => Number(row.total_score || 0)) },
+    { name: "总分 (total_score)", type: "line", smooth: true, data: rows.value.map((row) => Number(row.total_score || 0)) },
     {
-      name: "分数变化",
+      name: "分数变化 (score_change)",
       type: "bar",
       yAxisIndex: 1,
       data: rows.value.map((row) => Number(row.score_change || 0)),
