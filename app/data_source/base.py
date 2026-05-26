@@ -19,3 +19,7 @@ class FundDataSource(ABC):
     @abstractmethod
     def get_market_index_history(self, index_code: str) -> pd.DataFrame:
         raise NotImplementedError
+
+    @abstractmethod
+    def get_market_index_valuation(self, index_code: str, index_name: str) -> pd.DataFrame:
+        raise NotImplementedError

@@ -57,7 +57,9 @@
         </el-table-column>
         <el-table-column label="市场环境" min-width="130">
           <template #default="{ row }">
-            <el-tag :type="marketTag(row.market_signal)">{{ marketText(row.market_signal) }}</el-tag>
+            <el-tag :type="marketTag(row.market_signal)">
+              {{ marketText(row.market_signal) }} {{ percentileText(row.market_pe_percentile) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="同类排名" min-width="140">
@@ -198,6 +200,10 @@ function marketTag(signal?: Score["market_signal"]) {
   if (signal === "supportive") return "success";
   if (signal === "weak") return "warning";
   return "info";
+}
+
+function percentileText(value?: number | null) {
+  return value === null || value === undefined ? "" : `PE ${Math.round(value * 100)}%`;
 }
 
 function peerText(row: Score) {

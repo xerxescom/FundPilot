@@ -104,6 +104,38 @@ class AkshareFundDataSource(FundDataSource):
         df["daily_return"] = df["close"].pct_change()
         return df
 
+    def get_market_index_valuation(self, index_code: str, index_name: str) -> pd.DataFrame:
+        symbol_map = {
+            "sh000300": "沪深300",
+            "sh000905": "中证500",
+        }
+        symbol = symbol_map.get(index_code, index_name)
+        try:
+            import akshare as ak
+
+            raw = ak.stock_index_pe_lg(symbol=symbol)
+        except Exception as exc:
+            logger.warning("Failed to fetch market valuation for {} {}: {}", index_code, symbol, exc)
+            return pd.DataFrame()
+        if raw is None or raw.empty:
+            return pd.DataFrame()
+
+        date_col = self._pick_column(raw, ["日期", "date"])
+        pe_col = self._pick_column(raw, ["滚动市盈率", "PE_TTM", "pe_ttm"])
+        df = pd.DataFrame(
+            {
+                "index_code": index_code,
+                "index_name": index_name,
+                "trade_date": pd.to_datetime(raw[date_col], errors="coerce").dt.date,
+                "pe_ttm": pd.to_numeric(raw[pe_col], errors="coerce"),
+                "source": self.source_name,
+            }
+        )
+        df = df.dropna(subset=["trade_date", "pe_ttm"]).drop_duplicates(["index_code", "trade_date"])
+        df = df.sort_values("trade_date").reset_index(drop=True)
+        df["pe_percentile"] = df["pe_ttm"].rank(pct=True)
+        return df
+
     @staticmethod
     def _pick_column(df: pd.DataFrame, candidates: list[str]) -> str:
         col = AkshareFundDataSource._pick_optional_column(df, candidates)

@@ -26,6 +26,7 @@ class ScoreOut(BaseModel):
     risk_flag_labels: list[str] = Field(default_factory=list)
     market_signal: str | None = None
     market_reason: str | None = None
+    market_pe_percentile: Decimal | None = None
     peer_group: str | None = None
     peer_group_size: int | None = None
     peer_percentile: Decimal | None = None

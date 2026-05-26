@@ -104,6 +104,7 @@ def test_dashboard_today_api_contract(db_session):
     assert payload["unread_alerts"][0].title == "回撤提醒"
     assert "portfolio_diagnosis" in payload
     assert "score_summary" in payload
+    assert "pe_percentile" in payload["market_context"][0]
 
 
 def test_analysis_status_api_contract(db_session):
@@ -191,6 +192,7 @@ def test_score_strategy_api_contract(db_session):
     assert "buy_window_signal" in rows[0]
     assert "risk_flags" in rows[0]
     assert "risk_flag_labels" in rows[0]
+    assert "market_pe_percentile" in rows[0]
     assert "peer_group" in rows[0]
     assert "peer_reason" in rows[0]
 

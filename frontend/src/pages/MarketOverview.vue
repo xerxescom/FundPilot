@@ -9,7 +9,7 @@
         :key="item.index_code"
         :label="item.index_name"
         :value="pct(item.daily_return)"
-        :hint="`近1月 ${pct(item.return_1m)} · ${dateText(item.trade_date)}`"
+        :hint="`近1月 ${pct(item.return_1m)} · ${peText(item.pe_percentile)} · ${dateText(item.trade_date)}`"
       />
     </div>
     <div class="section panel">
@@ -20,6 +20,9 @@
         <el-table-column prop="close" label="收盘" />
         <el-table-column label="日涨跌"><template #default="{ row }">{{ pct(row.daily_return) }}</template></el-table-column>
         <el-table-column label="近1月"><template #default="{ row }">{{ pct(row.return_1m) }}</template></el-table-column>
+        <el-table-column label="PE TTM"><template #default="{ row }">{{ numberText(row.pe_ttm) }}</template></el-table-column>
+        <el-table-column label="PE 百分位"><template #default="{ row }">{{ peText(row.pe_percentile) }}</template></el-table-column>
+        <el-table-column prop="valuation_date" label="估值日期" />
         <el-table-column prop="source" label="来源" />
       </el-table>
     </div>
@@ -37,6 +40,14 @@ import MetricCard from "../components/MetricCard.vue";
 
 const loading = ref(false);
 const rows = ref<MarketContext[]>([]);
+
+function peText(value?: number | null) {
+  return value === null || value === undefined ? "暂无" : `${Math.round(value * 100)}%`;
+}
+
+function numberText(value?: number | null) {
+  return value === null || value === undefined ? "暂无" : Number(value).toFixed(2);
+}
 
 async function load() {
   rows.value = await api.market();

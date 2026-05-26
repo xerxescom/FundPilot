@@ -118,7 +118,7 @@
           :key="item.index_code"
           :label="item.index_name"
           :value="pct(item.daily_return)"
-          :hint="`近 1 月 ${pct(item.return_1m)}`"
+          :hint="marketHint(item)"
         />
       </div>
     </div>
@@ -173,6 +173,14 @@ function go(route: string) {
 
 function goScoreSignal(signals: string[]) {
   router.push({ path: "/scores", query: { signals: signals.join(",") } });
+}
+
+function peText(value?: number | null) {
+  return value === null || value === undefined ? "PE 暂无" : `PE ${Math.round(value * 100)}%`;
+}
+
+function marketHint(item: MarketContext) {
+  return `近 1 月 ${pct(item.return_1m)} · ${peText(item.pe_percentile)}`;
 }
 
 async function updateAlert(id: number, status: string) {

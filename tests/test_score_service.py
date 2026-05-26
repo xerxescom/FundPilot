@@ -1,7 +1,16 @@
 from datetime import date
 from decimal import Decimal
 
-from app.db.models import FundInfo, FundIndicator, FundNav, FundScore, MarketIndexDaily, PortfolioPosition, Watchlist
+from app.db.models import (
+    FundInfo,
+    FundIndicator,
+    FundNav,
+    FundScore,
+    MarketIndexDaily,
+    MarketValuationDaily,
+    PortfolioPosition,
+    Watchlist,
+)
 from app.services import score_service
 from app.services.score_service import (
     available_strategies,
@@ -171,6 +180,55 @@ def test_score_payload_weak_market_downgrades_favorable_window(db_session):
     assert payload["buy_window_signal"] != "favorable"
     assert "market_weak" in payload["risk_flags"]
     assert "市场环境偏弱" in payload["risk_flag_labels"]
+
+
+def test_score_payload_high_pe_percentile_weakens_market_signal(db_session):
+    today = date.today()
+    db_session.add_all(
+        [
+            FundInfo(
+                fund_code="000001",
+                fund_name="测试基金",
+                establish_date=date(2020, 1, 1),
+                fund_size=Decimal("30"),
+                buy_status="开放申购",
+            ),
+            FundIndicator(
+                fund_code="000001",
+                calc_date=today,
+                return_1m=Decimal("0.02"),
+                return_3m=Decimal("0.05"),
+                return_6m=Decimal("0.12"),
+                return_1y=Decimal("0.25"),
+                max_drawdown_1y=Decimal("-0.05"),
+                volatility_1y=Decimal("0.10"),
+                sharpe_1y=Decimal("1.30"),
+                win_rate_1y=Decimal("0.60"),
+            ),
+            FundScore(fund_code="000001", score_date=today, total_score=Decimal("92"), rating="重点关注"),
+            FundNav(fund_code="000001", nav_date=date(2025, 1, 1), unit_nav=Decimal("1.0")),
+            FundNav(fund_code="000001", nav_date=today, unit_nav=Decimal("1.3")),
+            MarketIndexDaily(index_code="sh000300", index_name="沪深300", trade_date=date(2026, 4, 1), close=Decimal("100")),
+            MarketIndexDaily(index_code="sh000300", index_name="沪深300", trade_date=today, close=Decimal("106")),
+            MarketValuationDaily(
+                index_code="sh000300",
+                index_name="沪深300",
+                trade_date=today,
+                pe_ttm=Decimal("18.50"),
+                pe_percentile=Decimal("0.90"),
+                source="test",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    payload = score_payload(db_session, "000001")
+
+    assert payload["market_signal"] == "weak"
+    assert payload["market_pe_percentile"] == 0.9
+    assert payload["buy_window_signal"] != "favorable"
+    assert "PE 百分位偏高" in payload["market_reason"]
+    assert "market_weak" in payload["risk_flags"]
 
 
 def test_score_payload_portfolio_concentration_downgrades_window(db_session):

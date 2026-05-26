@@ -10,4 +10,7 @@ class MarketContextOut(BaseModel):
     close: float | None = None
     daily_return: float | None = None
     return_1m: float | None = None
+    pe_ttm: float | None = None
+    pe_percentile: float | None = None
+    valuation_date: date | None = None
     source: str | None = None

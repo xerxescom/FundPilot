@@ -32,6 +32,7 @@ export interface Score {
   risk_flag_labels?: string[];
   market_signal?: Nullable<"supportive" | "neutral" | "weak">;
   market_reason?: Nullable<string>;
+  market_pe_percentile?: Nullable<number>;
   peer_group?: Nullable<string>;
   peer_group_size?: Nullable<number>;
   peer_percentile?: Nullable<number>;
@@ -200,6 +201,9 @@ export interface MarketContext {
   close?: Nullable<number>;
   daily_return?: Nullable<number>;
   return_1m?: Nullable<number>;
+  pe_ttm?: Nullable<number>;
+  pe_percentile?: Nullable<number>;
+  valuation_date?: Nullable<string>;
   source?: Nullable<string>;
 }
 

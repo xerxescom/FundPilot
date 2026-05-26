@@ -68,7 +68,7 @@
           <div class="signal-grid">
             <div>
               <span>市场环境</span>
-              <strong>{{ marketText(score?.market_signal) }}</strong>
+              <strong>{{ marketText(score?.market_signal) }} {{ percentileText(score?.market_pe_percentile) }}</strong>
               <small>{{ score?.market_reason || '暂无' }}</small>
             </div>
             <div>
@@ -179,7 +179,11 @@
           <MetricCard label="评分" :value="scoreText(score?.total_score)" :hint="score?.rating" />
           <MetricCard label="可信度" :value="confidenceText(score?.confidence_level)" :hint="scoreText(score?.confidence_score)" />
           <MetricCard label="窗口信号" :value="signalText(score?.buy_window_signal)" :hint="score?.buy_window_reason" />
-          <MetricCard label="市场环境" :value="marketText(score?.market_signal)" :hint="score?.market_reason" />
+          <MetricCard
+            label="市场环境"
+            :value="marketText(score?.market_signal)"
+            :hint="marketHint(score)"
+          />
           <MetricCard label="同类排名" :value="peerText(score)" :hint="score?.peer_reason" />
           <MetricCard label="组合适配" :value="fitText(score?.portfolio_fit_level)" :hint="score?.portfolio_fit_reason" />
         </div>
@@ -410,6 +414,15 @@ function signalTag(signal?: Score["buy_window_signal"] | null) {
 function marketText(signal?: Score["market_signal"] | null) {
   const labels = { supportive: "偏强", neutral: "中性", weak: "偏弱" };
   return signal ? labels[signal] : "暂无";
+}
+
+function percentileText(value?: number | null) {
+  return value === null || value === undefined ? "" : `PE ${Math.round(value * 100)}%`;
+}
+
+function marketHint(row?: Score | null) {
+  const percentile = percentileText(row?.market_pe_percentile);
+  return [percentile, row?.market_reason].filter(Boolean).join("；") || "暂无";
 }
 
 function peerText(row?: Score | null) {

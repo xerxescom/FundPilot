@@ -248,14 +248,43 @@ def _buy_window_signal(
 def _market_signal(db: Session) -> dict:
     context = market_service.latest_market_context(db)
     returns = [item["return_1m"] for item in context if item.get("return_1m") is not None]
+    pe_percentiles = [item["pe_percentile"] for item in context if item.get("pe_percentile") is not None]
+    avg_pe_percentile = (
+        sum(float(item) for item in pe_percentiles) / len(pe_percentiles) if pe_percentiles else None
+    )
     if not returns:
-        return {"market_signal": "neutral", "market_reason": "市场环境数据不足，窗口信号不做市场加成"}
+        return {
+            "market_signal": "neutral",
+            "market_reason": "市场环境数据不足，窗口信号不做市场加成",
+            "market_pe_percentile": avg_pe_percentile,
+        }
     avg_return = sum(float(item) for item in returns) / len(returns)
+    valuation_text = (
+        f"，平均 PE 百分位约 {avg_pe_percentile:.0%}" if avg_pe_percentile is not None else ""
+    )
+    if avg_pe_percentile is not None and avg_pe_percentile >= 0.85:
+        return {
+            "market_signal": "weak",
+            "market_reason": f"主要指数 PE 百分位偏高{valuation_text}，窗口信号需要降级观察",
+            "market_pe_percentile": avg_pe_percentile,
+        }
     if avg_return >= 0.03:
-        return {"market_signal": "supportive", "market_reason": "主要指数近1月整体偏强，对窗口信号形成支持"}
+        return {
+            "market_signal": "supportive",
+            "market_reason": f"主要指数近1月整体偏强{valuation_text}，对窗口信号形成支持",
+            "market_pe_percentile": avg_pe_percentile,
+        }
     if avg_return <= -0.03:
-        return {"market_signal": "weak", "market_reason": "主要指数近1月整体偏弱，窗口信号需要降级观察"}
-    return {"market_signal": "neutral", "market_reason": "主要指数近1月表现中性，市场环境不构成明显加减分"}
+        return {
+            "market_signal": "weak",
+            "market_reason": f"主要指数近1月整体偏弱{valuation_text}，窗口信号需要降级观察",
+            "market_pe_percentile": avg_pe_percentile,
+        }
+    return {
+        "market_signal": "neutral",
+        "market_reason": f"主要指数近1月表现中性{valuation_text}，市场环境不构成明显加减分",
+        "market_pe_percentile": avg_pe_percentile,
+    }
 
 
 def _portfolio_fit(
