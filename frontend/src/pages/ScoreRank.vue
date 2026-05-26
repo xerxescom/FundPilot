@@ -10,6 +10,22 @@
       <el-select v-model="ratings" multiple placeholder="评级筛选" style="min-width: 260px">
         <el-option v-for="rating in ratingOptions" :key="rating" :label="rating" :value="rating" />
       </el-select>
+      <el-select v-model="signals" multiple placeholder="窗口信号" style="min-width: 220px">
+        <el-option
+          v-for="signal in signalOptions"
+          :key="signal"
+          :label="signalText(signal)"
+          :value="signal"
+        />
+      </el-select>
+      <el-select v-model="confidenceLevels" multiple placeholder="可信度" style="min-width: 180px">
+        <el-option
+          v-for="level in confidenceOptions"
+          :key="level"
+          :label="confidenceText(level)"
+          :value="level"
+        />
+      </el-select>
       <el-slider v-model="minScore" :min="0" :max="100" style="width: 260px" />
     </div>
     <el-alert
@@ -84,13 +100,26 @@ const rows = ref<Score[]>([]);
 const strategies = ref<ScoreStrategy[]>([]);
 const selectedStrategy = ref("default");
 const ratings = ref<string[]>([]);
+const signals = ref<NonNullable<Score["buy_window_signal"]>[]>([]);
+const confidenceLevels = ref<NonNullable<Score["confidence_level"]>[]>([]);
 const minScore = ref(0);
 const strategyOptions = computed(() => strategies.value.map((item) => ({ label: item.name, value: item.key })));
 const currentStrategy = computed(() => strategies.value.find((item) => item.key === selectedStrategy.value));
 const ratingOptions = computed(() => Array.from(new Set(rows.value.map((row) => row.rating).filter(Boolean))) as string[]);
+const signalOptions = computed(
+  () => Array.from(new Set(rows.value.map((row) => row.buy_window_signal).filter(Boolean))) as NonNullable<Score["buy_window_signal"]>[],
+);
+const confidenceOptions = computed(
+  () => Array.from(new Set(rows.value.map((row) => row.confidence_level).filter(Boolean))) as NonNullable<Score["confidence_level"]>[],
+);
 const filtered = computed(() =>
   rows.value.filter(
-    (row) => (!ratings.value.length || ratings.value.includes(row.rating || "")) && Number(row.total_score || 0) >= minScore.value,
+    (row) =>
+      (!ratings.value.length || ratings.value.includes(row.rating || "")) &&
+      (!signals.value.length || signals.value.includes(row.buy_window_signal as NonNullable<Score["buy_window_signal"]>)) &&
+      (!confidenceLevels.value.length ||
+        confidenceLevels.value.includes(row.confidence_level as NonNullable<Score["confidence_level"]>)) &&
+      Number(row.total_score || 0) >= minScore.value,
   ),
 );
 const barOption = computed<EChartsOption>(() => ({
@@ -105,6 +134,8 @@ async function loadScores() {
   try {
     rows.value = await api.strategyTopScores(selectedStrategy.value);
     ratings.value = ratingOptions.value;
+    signals.value = [];
+    confidenceLevels.value = [];
   } finally {
     loading.value = false;
   }
