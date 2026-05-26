@@ -1,10 +1,44 @@
+:root {
+  /* HSL Colors */
+  --primary-h: 221;
+  --primary-s: 83%;
+  --primary-l: 53%;
+  --success-h: 142;
+  --success-s: 71%;
+  --success-l: 45%;
+  --warning-h: 38;
+  --warning-s: 92%;
+  --warning-l: 50%;
+  --danger-h: 348;
+  --danger-s: 83%;
+  --danger-l: 47%;
+  
+  /* Element Plus Overrides using HSL */
+  --el-color-primary: hsl(var(--primary-h), var(--primary-s), var(--primary-l));
+  --el-color-success: hsl(var(--success-h), var(--success-s), var(--success-l));
+  --el-color-warning: hsl(var(--warning-h), var(--warning-s), var(--warning-l));
+  --el-color-danger: hsl(var(--danger-h), var(--danger-s), var(--danger-l));
+  
+  --el-color-primary-light-3: hsla(var(--primary-h), var(--primary-s), var(--primary-l), 0.7);
+  --el-color-primary-light-5: hsla(var(--primary-h), var(--primary-s), var(--primary-l), 0.5);
+  --el-color-primary-light-7: hsla(var(--primary-h), var(--primary-s), var(--primary-l), 0.3);
+  --el-color-primary-light-9: hsla(var(--primary-h), var(--primary-s), var(--primary-l), 0.1);
+  --el-color-primary-dark-2: hsl(var(--primary-h), var(--primary-s), calc(var(--primary-l) - 10%));
+
+  /* Glassmorphism Variables */
+  --glass-bg: rgba(255, 255, 255, 0.65);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05);
+}
+
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  background: #f6f8fb;
+  background: linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%);
+  background-attachment: fixed;
   color: #111827;
   font-family:
     Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
@@ -15,14 +49,23 @@ body {
 }
 
 .sidebar {
-  background: #ffffff;
-  border-right: 1px solid #e5e7eb;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-right: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 1px 0 10px rgba(0,0,0,0.02);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 10;
+}
+
+.sidebar:hover {
+  box-shadow: 4px 0 20px rgba(0,0,0,0.06);
 }
 
 .brand {
   height: 74px;
   padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .brand-title {
@@ -39,6 +82,7 @@ body {
 
 .nav-menu {
   border-right: none;
+  background: transparent;
 }
 
 .topbar {
@@ -46,8 +90,12 @@ body {
   align-items: center;
   justify-content: space-between;
   height: 74px;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 1px 10px rgba(0,0,0,0.02);
+  z-index: 5;
 }
 
 .page-title {
@@ -78,10 +126,28 @@ body {
 }
 
 .panel {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
   padding: 16px;
+  box-shadow: var(--glass-shadow);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.panel:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.08);
+}
+
+/* Global Button Transitions */
+.el-button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.el-button:active {
+  transform: scale(0.95);
 }
 
 .metric-grid {
