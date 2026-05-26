@@ -50,6 +50,23 @@ export interface ScoreStrategy {
   scenario: string;
 }
 
+export interface ScoreTrendRow {
+  fund_code: string;
+  score_date: string;
+  total_score?: Nullable<number>;
+  score_change?: Nullable<number>;
+  trend_direction: "baseline" | "up" | "down" | "flat";
+  rating_changed: boolean;
+  previous_rating?: Nullable<string>;
+  rating?: Nullable<string>;
+  return_score?: Nullable<number>;
+  drawdown_score?: Nullable<number>;
+  volatility_score?: Nullable<number>;
+  stability_score?: Nullable<number>;
+  size_score?: Nullable<number>;
+  trade_status_score?: Nullable<number>;
+}
+
 export interface Alert {
   id: number;
   alert_type: string;

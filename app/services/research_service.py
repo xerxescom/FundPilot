@@ -64,11 +64,30 @@ def score_trend(db: Session, fund_code: str) -> list[dict]:
     rows = db.scalars(
         select(FundScore).where(FundScore.fund_code == fund_code).order_by(FundScore.score_date.asc())
     ).all()
-    return [
-        {
+    result = []
+    previous_score: float | None = None
+    previous_rating: str | None = None
+    for row in rows:
+        total_score = _float(row.total_score)
+        score_change = total_score - previous_score if total_score is not None and previous_score is not None else None
+        if score_change is None:
+            trend_direction = "baseline"
+        elif score_change >= 3:
+            trend_direction = "up"
+        elif score_change <= -3:
+            trend_direction = "down"
+        else:
+            trend_direction = "flat"
+        rating_changed = bool(previous_rating is not None and row.rating != previous_rating)
+        result.append(
+            {
             "fund_code": row.fund_code,
             "score_date": row.score_date,
-            "total_score": _float(row.total_score),
+            "total_score": total_score,
+            "score_change": score_change,
+            "trend_direction": trend_direction,
+            "rating_changed": rating_changed,
+            "previous_rating": previous_rating,
             "rating": row.rating,
             "return_score": _float(row.return_score),
             "drawdown_score": _float(row.drawdown_score),
@@ -77,8 +96,10 @@ def score_trend(db: Session, fund_code: str) -> list[dict]:
             "size_score": _float(row.size_score),
             "trade_status_score": _float(row.trade_status_score),
         }
-        for row in rows
-    ]
+        )
+        previous_score = total_score
+        previous_rating = row.rating
+    return result
 
 
 def industry_overview(db: Session) -> list[dict]:

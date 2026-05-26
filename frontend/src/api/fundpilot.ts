@@ -10,6 +10,7 @@ import type {
   Report,
   Score,
   ScoreStrategy,
+  ScoreTrendRow,
   SyncDiagnostics,
   WatchlistItem,
 } from "./types";
@@ -33,7 +34,7 @@ export const api = {
   topScores: (limit = 100) => getJson<Score[]>("/recommendations/top", { limit }),
   scoreStrategies: () => getJson<ScoreStrategy[]>("/scores/strategies"),
   strategyTopScores: (strategy = "default", limit = 100) => getJson<Score[]>("/scores/top", { strategy, limit }),
-  scoreTrend: (code: string) => getJson<unknown[]>(`/scores/trend/${code}`),
+  scoreTrend: (code: string) => getJson<ScoreTrendRow[]>(`/scores/trend/${code}`),
   dataHealth: () => getJson<DataHealth>("/data/health"),
   reconcile: (code: string) => getJson<unknown>(`/data/reconcile/${code}`),
   market: () => getJson<MarketContext[]>("/market/context"),
