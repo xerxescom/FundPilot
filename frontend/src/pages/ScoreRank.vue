@@ -89,6 +89,7 @@
 <script setup lang="ts">
 import type { EChartsOption } from "echarts";
 import { computed, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 
 import { api } from "../api/fundpilot";
 import { scoreText } from "../api/format";
@@ -96,12 +97,14 @@ import type { Score, ScoreStrategy } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 
 const loading = ref(false);
+const route = useRoute();
 const rows = ref<Score[]>([]);
 const strategies = ref<ScoreStrategy[]>([]);
 const selectedStrategy = ref("default");
 const ratings = ref<string[]>([]);
 const signals = ref<NonNullable<Score["buy_window_signal"]>[]>([]);
 const confidenceLevels = ref<NonNullable<Score["confidence_level"]>[]>([]);
+const initializedQueryFilters = ref(false);
 const minScore = ref(0);
 const strategyOptions = computed(() => strategies.value.map((item) => ({ label: item.name, value: item.key })));
 const currentStrategy = computed(() => strategies.value.find((item) => item.key === selectedStrategy.value));
@@ -134,11 +137,27 @@ async function loadScores() {
   try {
     rows.value = await api.strategyTopScores(selectedStrategy.value);
     ratings.value = ratingOptions.value;
-    signals.value = [];
-    confidenceLevels.value = [];
+    applyQueryFilters();
   } finally {
     loading.value = false;
   }
+}
+
+function parseQueryList(value: unknown) {
+  const raw = Array.isArray(value) ? value.join(",") : String(value || "");
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function applyQueryFilters() {
+  if (initializedQueryFilters.value) return;
+  const querySignals = parseQueryList(route.query.signals) as NonNullable<Score["buy_window_signal"]>[];
+  const queryConfidence = parseQueryList(route.query.confidence) as NonNullable<Score["confidence_level"]>[];
+  if (querySignals.length) signals.value = querySignals;
+  if (queryConfidence.length) confidenceLevels.value = queryConfidence;
+  initializedQueryFilters.value = true;
 }
 
 function confidenceText(level?: Score["confidence_level"]) {

@@ -11,10 +11,18 @@
     <div class="section panel">
       <h2 class="section-title">评分信号概览</h2>
       <div class="metric-grid">
-        <MetricCard label="已评分基金" :value="scoreSummary?.total_scored ?? 0" />
-        <MetricCard label="窗口较好" :value="scoreSummary?.favorable_count ?? 0" />
-        <MetricCard label="可以观察" :value="scoreSummary?.watch_count ?? 0" />
-        <MetricCard label="谨慎/等待" :value="scoreSummary?.cautious_count ?? 0" />
+        <button class="metric-action" @click="go('/scores')">
+          <MetricCard label="已评分基金" :value="scoreSummary?.total_scored ?? 0" />
+        </button>
+        <button class="metric-action" @click="goScoreSignal(['favorable'])">
+          <MetricCard label="窗口较好" :value="scoreSummary?.favorable_count ?? 0" />
+        </button>
+        <button class="metric-action" @click="goScoreSignal(['watch'])">
+          <MetricCard label="可以观察" :value="scoreSummary?.watch_count ?? 0" />
+        </button>
+        <button class="metric-action" @click="goScoreSignal(['wait_pullback', 'cautious', 'blocked'])">
+          <MetricCard label="谨慎/等待" :value="scoreSummary?.cautious_count ?? 0" />
+        </button>
       </div>
       <div v-if="scoreSummary?.top_risks.length" class="risk-chip-row">
         <el-tag v-for="risk in scoreSummary.top_risks" :key="risk.label" type="warning" effect="light">
@@ -163,6 +171,10 @@ function go(route: string) {
   router.push(route);
 }
 
+function goScoreSignal(signals: string[]) {
+  router.push({ path: "/scores", query: { signals: signals.join(",") } });
+}
+
 async function updateAlert(id: number, status: string) {
   await api.updateAlert(id, status);
   ElMessage.success("预警状态已更新");
@@ -199,5 +211,18 @@ onMounted(load);
 
 .compact-empty {
   padding: 8px 0 0;
+}
+
+.metric-action {
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.metric-action:hover :deep(.metric-card) {
+  border-color: #2563eb;
 }
 </style>
