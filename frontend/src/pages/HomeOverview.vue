@@ -65,24 +65,18 @@
       </div>
       <div class="panel">
         <h2 class="section-title">风险预警</h2>
-        <el-alert
-          v-for="alert in alerts.slice(0, 6)"
-          :key="alert.id"
-          class="alert-item"
-          type="warning"
-          :closable="false"
-          :title="alert.title || alert.alert_type"
-          :description="alert.content || ''"
-        >
-          <template #default>
-            <div class="toolbar compact">
-              <el-button size="small" @click="updateAlert(alert.id, 'read')">标为已读</el-button>
-              <el-button size="small" type="success" @click="updateAlert(alert.id, 'handled')">已处理</el-button>
-              <el-button size="small" @click="updateAlert(alert.id, 'ignored')">忽略</el-button>
-            </div>
-          </template>
-        </el-alert>
         <el-empty v-if="!alerts.length" description="暂无未读风险提醒" />
+        <el-collapse v-else v-model="openGroups">
+          <AlertGroup
+            v-for="group in groupedAlerts"
+            :key="group.key"
+            :group-key="group.key"
+            :group-label="group.label"
+            :items="group.items"
+            @batch-update="batchUpdate"
+            @single-update="updateAlert"
+          />
+        </el-collapse>
       </div>
     </div>
 
@@ -127,12 +121,13 @@
 
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import { api } from "../api/fundpilot";
 import { dateText, pct } from "../api/format";
 import type { Alert, DashboardTodo, DataHealth, MarketContext, Report, RiskItem, ScoreSignalSummary } from "../api/types";
+import AlertGroup from "../components/AlertGroup.vue";
 import MetricCard from "../components/MetricCard.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
 import ReportCard from "../components/ReportCard.vue";
@@ -148,6 +143,14 @@ interface DashboardToday {
   score_summary?: ScoreSignalSummary;
 }
 
+const GROUP_LABEL: Record<string, string> = {
+  daily_drop: "单日大幅下跌",
+  drawdown: "回撤超阈值",
+  score_drop: "评分明显下降",
+  position_weight: "持仓集中度过高",
+  portfolio_drawdown: "组合整体回撤",
+};
+
 const router = useRouter();
 const loading = ref(false);
 const data = ref<DashboardToday | null>(null);
@@ -159,6 +162,34 @@ const markets = computed(() => data.value?.market_context || []);
 const scoreSummary = computed(() => data.value?.score_summary);
 const latestReportTime = computed(() => data.value?.latest_report?.created_at?.slice(0, 16) || "暂无");
 const problemRows = computed(() => (health.value?.funds || []).filter((item) => (item.issues as unknown[])?.length));
+
+// Group alerts by alert_type, preserving a stable display order
+const GROUP_ORDER = ["daily_drop", "drawdown", "score_drop", "position_weight", "portfolio_drawdown"];
+const groupedAlerts = computed(() => {
+  const map = new Map<string, Alert[]>();
+  for (const a of alerts.value) {
+    const key = a.alert_type || "other";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(a);
+  }
+  // Add any alert_type not in the predefined order at the end
+  const keys = [...GROUP_ORDER.filter((k) => map.has(k)), ...([...map.keys()].filter((k) => !GROUP_ORDER.includes(k)))];
+  return keys.map((key) => ({
+    key,
+    label: GROUP_LABEL[key] || key,
+    items: map.get(key) || [],
+  }));
+});
+
+// Default open groups: those that have items (writable ref so el-collapse v-model works)
+const openGroups = ref<string[]>([]);
+watch(
+  groupedAlerts,
+  (groups) => {
+    openGroups.value = groups.filter((g) => g.items.length).map((g) => g.key);
+  },
+  { immediate: true }
+);
 
 function tagType(level: string) {
   if (level === "danger") return "error";
@@ -186,6 +217,12 @@ function marketHint(item: MarketContext) {
 async function updateAlert(id: number, status: string) {
   await api.updateAlert(id, status);
   ElMessage.success("预警状态已更新");
+  await load();
+}
+
+async function batchUpdate(ids: number[], status: string) {
+  await Promise.all(ids.map((id) => api.updateAlert(id, status)));
+  ElMessage.success(`已批量更新 ${ids.length} 条预警`);
   await load();
 }
 
