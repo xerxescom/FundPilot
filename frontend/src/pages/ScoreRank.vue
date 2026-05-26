@@ -59,7 +59,7 @@
         <el-table-column prop="rating" label="评级" />
         <el-table-column prop="strategy_name" label="评分策略" min-width="120" />
         <el-table-column label="风险标签" min-width="180">
-          <template #default="{ row }">{{ row.risk_flags?.length ? row.risk_flags.join("；") : "无" }}</template>
+          <template #default="{ row }">{{ riskLabels(row) }}</template>
         </el-table-column>
         <el-table-column prop="reason" label="推荐理由" min-width="280" />
       </el-table>
@@ -166,6 +166,11 @@ function fitTag(level?: Score["portfolio_fit_level"]) {
   if (level === "high") return "success";
   if (level === "medium") return "warning";
   return "danger";
+}
+
+function riskLabels(row: Score) {
+  const labels = row.risk_flag_labels?.length ? row.risk_flag_labels : row.risk_flags;
+  return labels?.length ? labels.join("；") : "无";
 }
 
 onMounted(async () => {

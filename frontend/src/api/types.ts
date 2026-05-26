@@ -29,6 +29,7 @@ export interface Score {
   buy_window_signal?: Nullable<"favorable" | "watch" | "wait_pullback" | "cautious" | "blocked">;
   buy_window_reason?: Nullable<string>;
   risk_flags?: string[];
+  risk_flag_labels?: string[];
   market_signal?: Nullable<"supportive" | "neutral" | "weak">;
   market_reason?: Nullable<string>;
   peer_group?: Nullable<string>;

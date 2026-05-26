@@ -23,6 +23,7 @@ class ScoreOut(BaseModel):
     buy_window_signal: str | None = None
     buy_window_reason: str | None = None
     risk_flags: list[str] = Field(default_factory=list)
+    risk_flag_labels: list[str] = Field(default_factory=list)
     market_signal: str | None = None
     market_reason: str | None = None
     peer_group: str | None = None

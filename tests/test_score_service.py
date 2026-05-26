@@ -110,6 +110,7 @@ def test_score_indicator_trade_blocked_signal():
 
     assert result["buy_window_signal"] == "blocked"
     assert "trade_blocked" in result["risk_flags"]
+    assert "交易状态受限" in result["risk_flag_labels"]
 
 
 def test_score_indicator_high_return_deep_drawdown_not_favorable():
@@ -168,6 +169,7 @@ def test_score_payload_weak_market_downgrades_favorable_window(db_session):
     assert payload["market_signal"] == "weak"
     assert payload["buy_window_signal"] != "favorable"
     assert "market_weak" in payload["risk_flags"]
+    assert "市场环境偏弱" in payload["risk_flag_labels"]
 
 
 def test_score_payload_portfolio_concentration_downgrades_window(db_session):
@@ -206,6 +208,7 @@ def test_score_payload_portfolio_concentration_downgrades_window(db_session):
     assert payload["portfolio_fit_level"] == "low"
     assert payload["buy_window_signal"] == "cautious"
     assert "portfolio_concentration" in payload["risk_flags"]
+    assert "持仓集中度偏高" in payload["risk_flag_labels"]
 
 
 def test_score_payload_low_peer_rank_downgrades_window(db_session):
@@ -253,6 +256,7 @@ def test_score_payload_low_peer_rank_downgrades_window(db_session):
     assert payload["peer_percentile"] <= 0.30
     assert payload["buy_window_signal"] == "wait_pullback"
     assert "peer_rank_low" in payload["risk_flags"]
+    assert "同类排名偏低" in payload["risk_flag_labels"]
 
 
 def test_top_scores_deduplicates_by_latest_fund_code(db_session):

@@ -47,7 +47,7 @@
           type="warning"
           :closable="false"
           title="风险提示"
-          :description="score.risk_flags.join('；')"
+          :description="riskLabels(score)"
         />
       </div>
 
@@ -320,6 +320,11 @@ function peerText(row?: Score | null) {
 function fitText(level?: Score["portfolio_fit_level"] | null) {
   const labels = { high: "高", medium: "中", low: "低" };
   return level ? labels[level] : "暂无";
+}
+
+function riskLabels(row: Score) {
+  const labels = row.risk_flag_labels?.length ? row.risk_flag_labels : row.risk_flags;
+  return labels?.length ? labels.join("；") : "无";
 }
 
 async function runAction(action: Exclude<ActionLoading, null>, work: () => Promise<void>) {

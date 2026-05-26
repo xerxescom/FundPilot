@@ -62,9 +62,36 @@ SCORE_STRATEGIES = {
     },
 }
 
+RISK_FLAG_LABELS = {
+    "already_held": "已在组合中持有",
+    "fund_profile_missing": "基金档案缺失",
+    "high_correlation": "与其他基金相关性偏高",
+    "indicator_missing": "缺少最新指标",
+    "key_metric_missing": "关键指标缺失",
+    "market_weak": "市场环境偏弱",
+    "near_term_overheated": "短期涨幅偏快",
+    "negative_sharpe": "夏普比率为负",
+    "peer_indicator_missing": "缺少同类比较指标",
+    "peer_metric_missing": "同类比较指标不足",
+    "peer_rank_low": "同类排名偏低",
+    "portfolio_concentration": "持仓集中度偏高",
+    "sharpe_missing": "夏普比率缺失",
+    "short_nav_history": "净值历史不足",
+    "small_fund_size": "基金规模偏小",
+    "stale_indicator": "指标日期偏旧",
+    "stale_nav": "净值日期偏旧",
+    "trade_blocked": "交易状态受限",
+    "trend_data_missing": "近期趋势数据不足",
+    "trend_weakening": "近期趋势转弱",
+}
+
 
 def _value(value: Decimal | None) -> float | None:
     return float(value) if value is not None else None
+
+
+def _risk_flag_labels(flags: list[str]) -> list[str]:
+    return [RISK_FLAG_LABELS.get(flag, flag) for flag in flags]
 
 
 def _confidence_level(score: int) -> str:
@@ -412,6 +439,7 @@ def _apply_context(payload: dict, market: dict, portfolio: dict, peer: dict) -> 
         signal = "wait_pullback"
         reason = f"{reason}；同类排名偏低，等待相对表现改善"
 
+    sorted_flags = sorted(risk_flags)
     payload.update(
         {
             **market,
@@ -424,7 +452,8 @@ def _apply_context(payload: dict, market: dict, portfolio: dict, peer: dict) -> 
             "portfolio_fit_reason": portfolio["portfolio_fit_reason"],
             "buy_window_signal": signal,
             "buy_window_reason": reason,
-            "risk_flags": sorted(risk_flags),
+            "risk_flags": sorted_flags,
+            "risk_flag_labels": _risk_flag_labels(sorted_flags),
         }
     )
     return payload
@@ -559,6 +588,7 @@ def score_indicator(
         if total_score >= 60
         else "暂不关注"
     )
+    sorted_flags = sorted(set(risk_flags))
     return {
         "total_score": total_score,
         "return_score": return_score,
@@ -573,7 +603,8 @@ def score_indicator(
         "confidence_level": confidence_level,
         "buy_window_signal": buy_window_signal,
         "buy_window_reason": buy_window_reason,
-        "risk_flags": sorted(set(risk_flags)),
+        "risk_flags": sorted_flags,
+        "risk_flag_labels": _risk_flag_labels(sorted_flags),
     }
 
 

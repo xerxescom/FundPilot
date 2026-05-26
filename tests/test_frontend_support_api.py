@@ -189,5 +189,6 @@ def test_score_strategy_api_contract(db_session):
     assert "confidence_score" in rows[0]
     assert "buy_window_signal" in rows[0]
     assert "risk_flags" in rows[0]
+    assert "risk_flag_labels" in rows[0]
     assert "peer_group" in rows[0]
     assert "peer_reason" in rows[0]
