@@ -9,6 +9,7 @@ class AlertOut(BaseModel):
     id: int
     alert_type: str
     fund_code: str | None = None
+    fund_name: str | None = None
     alert_level: str | None = None
     title: str | None = None
     content: str | None = None
@@ -19,3 +20,4 @@ class AlertOut(BaseModel):
 
 class AlertUpdate(BaseModel):
     status: str
+

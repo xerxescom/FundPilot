@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import FundNav, PortfolioPosition, PortfolioTransaction
+from app.db.models.fund import FundInfo
 from app.services.nav_service import latest_nav
 
 AUTO_SUMMARY_NOTE = "由买入记录自动汇总"
@@ -135,9 +136,12 @@ def delete_position(db: Session, position_id: int) -> bool:
 def position_summary(db: Session, position: PortfolioPosition) -> dict:
     nav = latest_nav(db, position.fund_code)
     latest = nav.unit_nav if nav else None
+    fund_info = db.scalar(select(FundInfo).where(FundInfo.fund_code == position.fund_code))
+    fund_name = fund_info.fund_name if fund_info else None
     if latest is None or position.holding_share is None:
         return {
             "position": position,
+            "fund_name": fund_name,
             "latest_nav": latest,
             "current_value": None,
             "profit_amount": None,
@@ -150,6 +154,7 @@ def position_summary(db: Session, position: PortfolioPosition) -> dict:
     profit = current_value - cost if cost is not None else None
     return {
         "position": position,
+        "fund_name": fund_name,
         "latest_nav": latest,
         "current_value": current_value,
         "profit_amount": profit,

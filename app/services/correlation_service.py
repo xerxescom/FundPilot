@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import FundNav, Watchlist
+from app.db.models.fund import FundInfo
 from app.services.alert_service import _upsert_alert
 
 
@@ -39,31 +40,49 @@ def calculate_correlation(db: Session, min_periods: int = 20) -> pd.DataFrame:
     return matrix.corr(min_periods=min_periods)
 
 
+def _build_name_map(db: Session, codes: list[str]) -> dict[str, str]:
+    """Return {fund_code: fund_name} for the given codes, falling back to the code itself."""
+    if not codes:
+        return {}
+    infos = db.scalars(select(FundInfo).where(FundInfo.fund_code.in_(codes))).all()
+    return {info.fund_code: info.fund_name for info in infos}
+
+
 def high_correlation_pairs(db: Session, threshold: Decimal = Decimal("0.85")) -> list[dict]:
     corr = calculate_correlation(db)
     pairs = []
     if corr.empty:
         return pairs
     columns = list(corr.columns)
+    name_map = _build_name_map(db, columns)
     for i, left in enumerate(columns):
         for right in columns[i + 1 :]:
             value = corr.loc[left, right]
             if pd.notna(value) and value >= float(threshold):
-                pairs.append({"fund_a": left, "fund_b": right, "correlation": float(value)})
+                pairs.append({
+                    "fund_a": left,
+                    "fund_a_name": name_map.get(left, left),
+                    "fund_b": right,
+                    "fund_b_name": name_map.get(right, right),
+                    "correlation": float(value),
+                })
     return pairs
 
 
 def generate_correlation_alerts(db: Session) -> list:
     alerts = []
     for pair in high_correlation_pairs(db):
+        a_label = f"{pair['fund_a_name']}({pair['fund_a']})"
+        b_label = f"{pair['fund_b_name']}({pair['fund_b']})"
         alerts.append(
             _upsert_alert(
                 db,
                 "high_correlation",
                 pair["fund_a"],
                 "medium",
-                f"{pair['fund_a']} 与 {pair['fund_b']} 相关性过高",
+                f"{a_label} 与 {b_label} 相关性过高",
                 f"近日日收益率相关系数为 {pair['correlation']:.2f}，可能存在重复配置。",
             )
         )
     return alerts
+

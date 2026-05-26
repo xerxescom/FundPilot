@@ -55,7 +55,7 @@ export const api = {
   compareFunds: (codes: string[]) => getJson<unknown>("/funds/compare", { codes: codes.join(",") }),
   industryOverview: () => getJson<unknown[]>("/research/industry-overview"),
   riskReturn: () => getJson<unknown[]>("/research/risk-return"),
-  correlationMatrix: () => getJson<Record<string, Record<string, number>>>("/correlation/matrix"),
+  correlationMatrix: () => getJson<unknown>("/correlation/matrix"),
   correlationPairs: () => getJson<unknown[]>("/correlation/pairs"),
   correlationReturns: (fundA: string, fundB: string) =>
     getJson<unknown[]>("/correlation/returns", { fund_a: fundA, fund_b: fundB }),

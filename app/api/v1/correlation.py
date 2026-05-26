@@ -10,7 +10,13 @@ router = APIRouter()
 @router.get("/matrix")
 def correlation_matrix(db: Session = Depends(get_db)):
     corr = correlation_service.calculate_correlation(db)
-    return {} if corr.empty else corr.round(4).to_dict()
+    if corr.empty:
+        return {"matrix": {}, "name_map": {}}
+    matrix = corr.round(4).to_dict()
+    codes = list(corr.columns)
+    name_map = correlation_service._build_name_map(db, codes)
+    return {"matrix": matrix, "name_map": name_map}
+
 
 
 @router.get("/pairs")

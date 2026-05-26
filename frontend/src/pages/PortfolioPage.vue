@@ -44,7 +44,8 @@
         <h2 class="section-title">持仓列表</h2>
         <el-table :data="positionRows" border stripe>
           <el-table-column prop="id" label="编号 (ID)" width="90" />
-          <el-table-column prop="fund_code" label="基金代码" />
+          <el-table-column prop="fund_code" label="基金代码" width="110" />
+          <el-table-column prop="fund_name" label="基金名称" min-width="160" />
           <el-table-column prop="holding_share" label="持有份额" />
           <el-table-column prop="latest_nav" label="最新净值" />
           <el-table-column prop="current_value" label="当前市值" />
@@ -64,9 +65,10 @@
 
     <div class="section panel">
       <h2 class="section-title">买入记录</h2>
-      <el-table :data="transactions" border stripe>
+      <el-table :data="transactionRows" border stripe>
         <el-table-column prop="id" label="编号 (ID)" width="90" />
-        <el-table-column prop="fund_code" label="基金代码" />
+        <el-table-column prop="fund_code" label="基金代码" width="110" />
+        <el-table-column prop="fund_name" label="基金名称" min-width="160" />
         <el-table-column prop="trade_date" label="买入日期" />
         <el-table-column prop="amount" label="买入金额" />
         <el-table-column prop="nav" label="成交净值" />
@@ -88,7 +90,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "../api/fundpilot";
 import { money, pct } from "../api/format";
-import type { PortfolioDiagnosis, PortfolioOverview } from "../api/types";
+import type { PortfolioDiagnosis, PortfolioOverview, WatchlistItem } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import MetricCard from "../components/MetricCard.vue";
 
@@ -96,16 +98,31 @@ const loading = ref(false);
 const overview = ref<PortfolioOverview | null>(null);
 const diagnosis = ref<PortfolioDiagnosis | null>(null);
 const transactions = ref<unknown[]>([]);
+const watchlist = ref<WatchlistItem[]>([]);
 const transaction = reactive({ fund_code: "", trade_date: "", amount: 0, nav: 0, fee: 0 });
+
+/** {code: name} map built from watchlist for transaction rows */
+const nameMap = computed(() =>
+  Object.fromEntries(watchlist.value.map((w) => [w.fund_code, w.fund_name || ""])),
+);
 
 const positionRows = computed(() =>
   (overview.value?.positions || []).map((item) => ({
     id: item.position.id,
     fund_code: item.position.fund_code,
+    fund_name: (item as Record<string, unknown>).fund_name as string | undefined,
     holding_share: item.position.holding_share,
     latest_nav: item.latest_nav,
     current_value: item.current_value,
     profit_rate: item.profit_rate,
+  })),
+);
+
+/** Transactions enriched with fund_name from watchlist */
+const transactionRows = computed(() =>
+  (transactions.value as Array<Record<string, unknown>>).map((t) => ({
+    ...t,
+    fund_name: nameMap.value[t.fund_code as string] || "",
   })),
 );
 
@@ -115,7 +132,10 @@ const pieOption = computed<EChartsOption>(() => ({
     {
       type: "pie",
       radius: ["45%", "70%"],
-      data: positionRows.value.map((row) => ({ name: row.fund_code, value: row.current_value || 0 })),
+      data: positionRows.value.map((row) => ({
+        name: row.fund_name ? `${row.fund_name} (${row.fund_code})` : row.fund_code,
+        value: row.current_value || 0,
+      })),
     },
   ],
 }));
@@ -123,10 +143,11 @@ const pieOption = computed<EChartsOption>(() => ({
 async function load() {
   loading.value = true;
   try {
-    [overview.value, transactions.value, diagnosis.value] = await Promise.all([
+    [overview.value, transactions.value, diagnosis.value, watchlist.value] = await Promise.all([
       api.portfolioOverview(),
       api.portfolioTransactions(),
       api.portfolioDiagnosis() as Promise<PortfolioDiagnosis>,
+      api.watchlist(),
     ]);
   } finally {
     loading.value = false;

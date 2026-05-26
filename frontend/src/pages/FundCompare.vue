@@ -45,7 +45,14 @@ const comparison = ref<Record<string, unknown> | null>(null);
 const industryRows = ref<Array<Record<string, unknown>>>([]);
 const fundRows = computed(() => (comparison.value?.funds as Array<Record<string, unknown>>) || []);
 const scatterOption = computed<EChartsOption>(() => ({
-  tooltip: { trigger: "item" },
+  tooltip: {
+    trigger: "item",
+    formatter: (params: unknown) => {
+      const p = params as { data: [number, number, string] };
+      const [drawdown, ret, label] = p.data;
+      return `${label}<br/>最大回撤: ${(drawdown * 100).toFixed(2)}%<br/>近1年收益: ${(ret * 100).toFixed(2)}%`;
+    },
+  },
   xAxis: { name: "最大回撤", type: "value" },
   yAxis: { name: "近1年收益", type: "value" },
   series: [
@@ -54,8 +61,16 @@ const scatterOption = computed<EChartsOption>(() => ({
       data: fundRows.value.map((row) => [
         Number(row.max_drawdown_1y || 0),
         Number(row.return_1y || 0),
-        String(row.fund_code || ""),
+        String(row.fund_name || row.fund_code || ""),
       ]),
+      label: {
+        show: true,
+        formatter: (params: unknown) => {
+          const p = params as { data: [number, number, string] };
+          return p.data[2];
+        },
+        position: "right",
+      },
     },
   ],
 }));

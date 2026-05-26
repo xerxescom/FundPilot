@@ -82,6 +82,7 @@ export interface Alert {
   id: number;
   alert_type: string;
   fund_code?: Nullable<string>;
+  fund_name?: Nullable<string>;
   alert_level?: Nullable<string>;
   title?: Nullable<string>;
   content?: Nullable<string>;
