@@ -17,38 +17,101 @@
     <PageSkeleton v-if="loading && !hasLoadedOnce" class="section" />
 
     <div v-else-if="fundCode" v-loading="loading || busy" :element-loading-text="loadingText" class="fund-detail-body">
-      <div v-if="status" class="section panel">
-        <h2 class="section-title">基金档案</h2>
-        <div class="metric-grid">
-          <MetricCard label="基金名称" :value="status.fund_name || fundCode" />
-          <MetricCard label="分析状态" :value="status.status_label" :hint="status.data_status" />
-          <MetricCard label="最新净值" :value="status.latest_nav ?? '暂无'" :hint="dateText(status.latest_nav_date)" />
-          <MetricCard label="当前评级" :value="status.rating || '暂无'" :hint="scoreText(status.latest_score)" />
-          <MetricCard label="评分可信度" :value="confidenceText(score?.confidence_level)" :hint="scoreText(score?.confidence_score)" />
-          <MetricCard label="窗口信号" :value="signalText(score?.buy_window_signal)" :hint="score?.buy_window_reason || '不构成投资建议'" />
-          <MetricCard label="市场环境" :value="marketText(score?.market_signal)" :hint="score?.market_reason" />
-          <MetricCard label="同类排名" :value="peerText(score)" :hint="score?.peer_reason" />
-          <MetricCard label="组合适配" :value="fitText(score?.portfolio_fit_level)" :hint="score?.portfolio_fit_reason" />
+      <div v-if="status" class="section detail-hero">
+        <div class="hero-main">
+          <div>
+            <div class="hero-kicker">基金档案</div>
+            <h2 class="fund-title">{{ status.fund_name || fundCode }}</h2>
+            <div class="fund-meta">
+              <span>{{ fundCode }}</span>
+              <span>{{ status.data_status }}</span>
+              <span>{{ dateText(status.latest_nav_date) }}</span>
+            </div>
+          </div>
+          <div class="hero-score">
+            <div class="hero-score-label">综合评分</div>
+            <div class="hero-score-value">{{ scoreText(status.latest_score) }}</div>
+            <el-tag :type="status.rating ? 'primary' : 'info'" effect="plain">{{ status.rating || '暂无评级' }}</el-tag>
+          </div>
         </div>
-        <el-steps class="section" :active="activeStep" finish-status="success" simple>
-          <el-step v-for="step in status.steps" :key="step.key" :title="step.label" />
-        </el-steps>
-        <el-alert
-          v-if="status.score_reason"
-          class="section"
-          type="info"
-          :closable="false"
-          title="评分原因"
-          :description="status.score_reason"
-        />
-        <el-alert
-          v-if="score?.risk_flags?.length"
-          class="section"
-          type="warning"
-          :closable="false"
-          title="风险提示"
-          :description="riskLabels(score)"
-        />
+
+        <div class="hero-facts">
+          <div class="fact-item">
+            <span>分析状态</span>
+            <strong>{{ status.status_label }}</strong>
+          </div>
+          <div class="fact-item">
+            <span>最新净值</span>
+            <strong>{{ status.latest_nav ?? '暂无' }}</strong>
+          </div>
+          <div class="fact-item">
+            <span>评分可信度</span>
+            <strong>{{ confidenceText(score?.confidence_level) }}</strong>
+            <small>{{ scoreText(score?.confidence_score) }}</small>
+          </div>
+          <div class="fact-item">
+            <span>同类排名</span>
+            <strong>{{ peerText(score) }}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="status" class="section decision-layout">
+        <section class="decision-panel signal-panel">
+          <div class="module-heading">
+            <span>窗口判断</span>
+            <el-tag :type="signalTag(score?.buy_window_signal)" effect="dark">
+              {{ signalText(score?.buy_window_signal) }}
+            </el-tag>
+          </div>
+          <p class="decision-text">{{ score?.buy_window_reason || '暂无窗口判断，请先完成评分。' }}</p>
+          <div class="signal-grid">
+            <div>
+              <span>市场环境</span>
+              <strong>{{ marketText(score?.market_signal) }}</strong>
+              <small>{{ score?.market_reason || '暂无' }}</small>
+            </div>
+            <div>
+              <span>组合适配</span>
+              <strong>{{ fitText(score?.portfolio_fit_level) }}</strong>
+              <small>{{ score?.portfolio_fit_reason || '暂无' }}</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="decision-panel progress-panel">
+          <div class="module-heading">
+            <span>分析进度</span>
+            <strong>{{ activeStep }}/{{ status.steps.length }}</strong>
+          </div>
+          <el-steps class="progress-steps" :active="activeStep" finish-status="success" simple>
+            <el-step v-for="step in status.steps" :key="step.key" :title="step.label" />
+          </el-steps>
+        </section>
+      </div>
+
+      <div v-if="status && (scoreReasonItems.length || riskLabelItems.length)" class="section insight-section">
+        <section v-if="scoreReasonItems.length" class="insight-panel">
+          <div class="module-heading">
+            <span>评分拆解</span>
+            <el-tag type="info" effect="plain">{{ scoreReasonItems.length }} 条</el-tag>
+          </div>
+          <ul class="insight-list">
+            <li v-for="item in scoreReasonItems" :key="item">{{ item }}</li>
+          </ul>
+        </section>
+
+        <section v-if="riskLabelItems.length" class="insight-panel risk-panel">
+          <div class="module-heading">
+            <span>风险提示</span>
+            <el-tag type="warning" effect="plain">{{ riskLabelItems.length }} 条</el-tag>
+          </div>
+          <div class="risk-tags">
+            <el-tag v-for="item in riskLabelItems" :key="item" type="warning" effect="light">
+              {{ item }}
+            </el-tag>
+          </div>
+        </section>
       </div>
 
       <el-alert
@@ -67,8 +130,14 @@
         </el-button>
       </div>
 
-      <div v-if="syncDiagnostics" class="section panel">
-        <h2 class="section-title">同步诊断</h2>
+      <div v-if="syncDiagnostics" class="section diagnostics-section">
+        <div class="section-heading-row">
+          <div>
+            <div class="section-eyebrow">Data Quality</div>
+            <h2 class="section-title">同步诊断</h2>
+          </div>
+          <el-tag type="info" effect="plain">{{ syncDiagnostics.source }}</el-tag>
+        </div>
         <div class="metric-grid">
           <MetricCard label="使用数据源" :value="syncDiagnostics.source" />
           <MetricCard label="同步行数" :value="syncDiagnostics.synced_rows" />
@@ -97,7 +166,13 @@
       </div>
 
       <template v-if="!needsFullAnalysis">
-        <div class="section metric-grid">
+        <div class="section section-heading-row">
+          <div>
+            <div class="section-eyebrow">Risk & Return</div>
+            <h2 class="section-title">收益风险概览</h2>
+          </div>
+        </div>
+        <div class="metric-grid metric-strip">
           <MetricCard label="近 1 月收益" :value="pct(indicator?.return_1m)" />
           <MetricCard label="近 1 年收益" :value="pct(indicator?.return_1y)" />
           <MetricCard label="最大回撤" :value="pct(indicator?.max_drawdown_1y)" />
@@ -109,14 +184,24 @@
           <MetricCard label="组合适配" :value="fitText(score?.portfolio_fit_level)" :hint="score?.portfolio_fit_reason" />
         </div>
 
-        <div class="section panel chart-panel">
-          <h2 class="section-title">净值、回撤与日涨跌幅</h2>
+        <div class="section chart-panel">
+          <div class="section-heading-row">
+            <div>
+              <div class="section-eyebrow">Performance</div>
+              <h2 class="section-title">净值、回撤与日涨跌幅</h2>
+            </div>
+          </div>
           <ChartSkeleton v-if="loading" />
           <ChartBox v-else :option="navOption" />
         </div>
 
-        <div class="section panel">
-          <h2 class="section-title">净值明细</h2>
+        <div class="section table-section">
+          <div class="section-heading-row">
+            <div>
+              <div class="section-eyebrow">NAV Detail</div>
+              <h2 class="section-title">净值明细</h2>
+            </div>
+          </div>
           <el-skeleton v-if="loading" :rows="6" animated />
           <el-table
             v-else
@@ -189,6 +274,17 @@ const fundCode = computed(() => (manualCode.value || selected.value || String(ro
 const needsFullAnalysis = computed(() => !navRows.value.length || !indicator.value || !score.value);
 const busy = computed(() => actionLoading.value !== null);
 const activeStep = computed(() => status.value?.steps.filter((step) => step.done).length || 0);
+const scoreReasonItems = computed(() =>
+  (status.value?.score_reason || "")
+    .split("；")
+    .map((item) => item.trim())
+    .filter(Boolean),
+);
+const riskLabelItems = computed(() => {
+  if (!score.value) return [];
+  const labels = score.value.risk_flag_labels?.length ? score.value.risk_flag_labels : score.value.risk_flags;
+  return labels || [];
+});
 const loadingText = computed(() => {
   if (actionLoading.value === "analyze") return "正在同步净值、计算指标并生成评分...";
   if (actionLoading.value === "report") return "正在调用模型生成基金解释，可能需要一点时间...";
@@ -304,6 +400,13 @@ function signalText(signal?: Score["buy_window_signal"] | null) {
   return signal ? labels[signal] : "暂无";
 }
 
+function signalTag(signal?: Score["buy_window_signal"] | null) {
+  if (signal === "favorable") return "success";
+  if (signal === "watch") return "primary";
+  if (signal === "wait_pullback") return "warning";
+  return "danger";
+}
+
 function marketText(signal?: Score["market_signal"] | null) {
   const labels = { supportive: "偏强", neutral: "中性", weak: "偏弱" };
   return signal ? labels[signal] : "暂无";
@@ -394,6 +497,226 @@ watch(fundCode, loadFund);
   min-height: 360px;
 }
 
+.detail-hero,
+.decision-panel,
+.diagnostics-section,
+.chart-panel,
+.table-section {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.detail-hero {
+  padding: 22px;
+  border-left: 4px solid #2563eb;
+}
+
+.hero-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.hero-kicker,
+.section-eyebrow {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.fund-title {
+  margin: 6px 0 8px;
+  font-size: 26px;
+  font-weight: 780;
+}
+
+.fund-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.fund-meta span + span::before {
+  content: "/";
+  margin-right: 8px;
+  color: #cbd5e1;
+}
+
+.hero-score {
+  min-width: 148px;
+  text-align: right;
+}
+
+.hero-score-label {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.hero-score-value {
+  margin: 4px 0 8px;
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.hero-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 20px;
+  overflow: hidden;
+  background: #e5e7eb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.fact-item {
+  min-height: 86px;
+  padding: 14px;
+  background: #f8fafc;
+}
+
+.fact-item span,
+.signal-grid span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.fact-item strong,
+.signal-grid strong {
+  display: block;
+  margin-top: 7px;
+  font-size: 18px;
+}
+
+.fact-item small,
+.signal-grid small {
+  display: block;
+  margin-top: 5px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.decision-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+  gap: 14px;
+}
+
+.decision-panel {
+  padding: 18px;
+}
+
+.signal-panel {
+  border-left: 4px solid #10b981;
+}
+
+.progress-panel {
+  border-left: 4px solid #8b5cf6;
+}
+
+.module-heading,
+.section-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.module-heading span {
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.decision-text {
+  margin: 14px 0 16px;
+  color: #334155;
+  line-height: 1.7;
+}
+
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.signal-grid > div {
+  padding: 13px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.progress-steps {
+  margin-top: 16px;
+}
+
+.insight-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.65fr);
+  gap: 14px;
+}
+
+.insight-panel {
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #0ea5e9;
+  border-radius: 8px;
+}
+
+.risk-panel {
+  border-left-color: #f59e0b;
+}
+
+.insight-list {
+  display: grid;
+  gap: 9px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.insight-list li {
+  position: relative;
+  padding-left: 18px;
+  color: #334155;
+  line-height: 1.6;
+}
+
+.insight-list li::before {
+  position: absolute;
+  top: 0.68em;
+  left: 0;
+  width: 7px;
+  height: 7px;
+  background: #0ea5e9;
+  border-radius: 50%;
+  content: "";
+}
+
+.risk-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.diagnostics-section,
+.chart-panel,
+.table-section {
+  padding: 16px;
+}
+
+.metric-strip {
+  align-items: stretch;
+}
+
 .empty-action {
   display: flex;
   justify-content: center;
@@ -407,5 +730,31 @@ watch(fundCode, loadFund);
 .table-pagination {
   justify-content: flex-end;
   margin-top: 14px;
+}
+
+@media (max-width: 980px) {
+  .hero-main,
+  .module-heading,
+  .section-heading-row {
+    align-items: flex-start;
+  }
+
+  .hero-main,
+  .decision-layout,
+  .signal-grid,
+  .hero-facts,
+  .insight-section {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-main,
+  .module-heading,
+  .section-heading-row {
+    flex-direction: column;
+  }
+
+  .hero-score {
+    text-align: left;
+  }
 }
 </style>
