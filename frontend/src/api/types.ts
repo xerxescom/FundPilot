@@ -250,6 +250,15 @@ export interface FundNav {
   source?: Nullable<string>;
 }
 
+export interface FundHoldingStock {
+  fund_code: string;
+  report_date: string;
+  stock_code: string;
+  stock_name: string;
+  weight?: Nullable<number>;
+  source?: Nullable<string>;
+}
+
 export interface Indicator {
   fund_code: string;
   calc_date: string;

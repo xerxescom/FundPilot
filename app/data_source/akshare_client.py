@@ -81,6 +81,14 @@ class AkshareFundDataSource(FundDataSource):
             return pd.DataFrame()
 
     def get_fund_holding_industries(self, fund_code: str) -> pd.DataFrame:
+        stocks = self.get_fund_holding_stocks(fund_code)
+        if stocks.empty or "industry" not in stocks.columns or stocks["industry"].isna().all():
+            return pd.DataFrame()
+        rows = stocks.dropna(subset=["industry", "weight"])
+        grouped = rows.groupby(["fund_code", "report_date", "industry", "source"], as_index=False)["weight"].sum()
+        return grouped.sort_values("weight", ascending=False).reset_index(drop=True)
+
+    def get_fund_holding_stocks(self, fund_code: str) -> pd.DataFrame:
         fund_code = fund_code.zfill(6)
         try:
             import akshare as ak
@@ -97,15 +105,19 @@ class AkshareFundDataSource(FundDataSource):
                 continue
             if raw is None or raw.empty:
                 continue
+            code_col = self._pick_optional_column(raw, ["股票代码", "证券代码", "代码", "stock_code"])
+            name_col = self._pick_optional_column(raw, ["股票名称", "证券名称", "名称", "stock_name"])
             industry_col = self._pick_optional_column(raw, ["行业", "所属行业", "申万行业", "industry"])
             weight_col = self._pick_optional_column(raw, ["占净值比例", "持仓占比", "占比", "weight"])
             report_col = self._pick_optional_column(raw, ["季度", "报告期", "报告日期", "date"])
-            if not industry_col or not weight_col:
+            if not code_col or not name_col or not weight_col:
                 continue
             frame = pd.DataFrame(
                 {
                     "fund_code": fund_code,
-                    "industry": raw[industry_col].astype(str),
+                    "stock_code": raw[code_col].astype(str).str.extract(r"(\d+)", expand=False).fillna(raw[code_col].astype(str)),
+                    "stock_name": raw[name_col].astype(str),
+                    "industry": raw[industry_col].astype(str) if industry_col else None,
                     "weight": self._normalize_return(raw[weight_col]),
                     "report_date": pd.to_datetime(raw[report_col], errors="coerce").dt.date if report_col else None,
                     "source": self.source_name,
@@ -123,8 +135,7 @@ class AkshareFundDataSource(FundDataSource):
             rows["report_date"] = pd.Timestamp.today().date()
         latest_date = rows["report_date"].dropna().max()
         latest = rows[rows["report_date"] == latest_date]
-        grouped = latest.groupby(["fund_code", "report_date", "industry", "source"], as_index=False)["weight"].sum()
-        return grouped.sort_values("weight", ascending=False).reset_index(drop=True)
+        return latest.sort_values("weight", ascending=False).head(10).reset_index(drop=True)
 
     def get_market_index_history(self, index_code: str) -> pd.DataFrame:
         try:

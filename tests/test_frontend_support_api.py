@@ -5,12 +5,12 @@ from app.api.v1.alert import update_alert
 from app.api.v1.correlation import correlation_matrix, fund_return_series
 from app.api.v1.dashboard import dashboard_overview, dashboard_today
 from app.api.v1 import fund as fund_api
-from app.api.v1.fund import get_analysis_status
+from app.api.v1.fund import get_analysis_status, get_holding_stocks
 from app.api.v1.portfolio import portfolio_diagnosis, simulate_buy
 from app.api.v1.report import ollama_status
 from app.api.v1.score import score_signal_summary, score_strategies, top_scores_by_strategy
 from app.api.v1.research import industry_overview, risk_return_points
-from app.db.models import AlertEvent, FundIndicator, FundInfo, FundNav, FundScore, PortfolioPosition, Watchlist
+from app.db.models import AlertEvent, FundHoldingStock, FundIndicator, FundInfo, FundNav, FundScore, PortfolioPosition, Watchlist
 from app.schemas.alert import AlertUpdate
 from app.schemas.portfolio import PortfolioBuySimulationIn
 from app.services.ai.ollama_client import OllamaClient
@@ -120,6 +120,25 @@ def test_analysis_status_api_contract(db_session):
     assert payload["status"] == "score_ready"
     assert payload["steps"][0]["done"] is True
     assert payload["rating"] == "稳健观察"
+
+
+def test_holding_stocks_api_contract(db_session):
+    db_session.add(
+        FundHoldingStock(
+            fund_code="000001",
+            report_date=date(2026, 3, 31),
+            stock_code="600519",
+            stock_name="贵州茅台",
+            weight=Decimal("0.08"),
+            source="test",
+        )
+    )
+    db_session.commit()
+
+    rows = get_holding_stocks("000001", db_session)
+
+    assert rows[0].stock_code == "600519"
+    assert rows[0].stock_name == "贵州茅台"
 
 
 def test_sync_nav_api_returns_diagnostics(monkeypatch, db_session):

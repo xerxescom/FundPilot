@@ -52,3 +52,18 @@ class FundHoldingIndustry(Base):
     weight: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     source: Mapped[str | None] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class FundHoldingStock(Base):
+    __tablename__ = "fund_holding_stock"
+    __table_args__ = (UniqueConstraint("fund_code", "report_date", "stock_code", name="uq_fund_holding_stock"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fund_code: Mapped[str] = mapped_column(String(20), index=True)
+    report_date: Mapped[date] = mapped_column(Date, index=True)
+    stock_code: Mapped[str] = mapped_column(String(30), index=True)
+    stock_name: Mapped[str] = mapped_column(String(100))
+    industry: Mapped[str | None] = mapped_column(String(100), index=True)
+    weight: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    source: Mapped[str | None] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

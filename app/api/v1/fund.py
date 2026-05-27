@@ -4,10 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.db.models import FundInfo
 from app.db.session import get_db
-from app.schemas.fund import FundInfoOut, FundNavOut
+from app.schemas.fund import FundHoldingStockOut, FundInfoOut, FundNavOut
 from app.schemas.indicator import IndicatorOut
 from app.schemas.score import ScoreOut
-from app.services import fund_analysis_service, indicator_service, nav_service, research_service, score_service
+from app.services import fund_analysis_service, holding_service, indicator_service, nav_service, research_service, score_service
 
 router = APIRouter()
 recommendation_router = APIRouter()
@@ -32,6 +32,16 @@ def get_fund(fund_code: str, db: Session = Depends(get_db)):
 @router.get("/{fund_code}/nav", response_model=list[FundNavOut])
 def get_nav(fund_code: str, db: Session = Depends(get_db)):
     return nav_service.list_fund_nav(db, fund_code)
+
+
+@router.get("/{fund_code}/holdings/stocks", response_model=list[FundHoldingStockOut])
+def get_holding_stocks(fund_code: str, db: Session = Depends(get_db)):
+    return holding_service.latest_holding_stocks(db, fund_code)
+
+
+@router.post("/{fund_code}/holdings/stocks/sync")
+def sync_holding_stocks(fund_code: str, db: Session = Depends(get_db)):
+    return {"fund_code": fund_code.zfill(6), "synced_rows": holding_service.sync_fund_holding_stocks(db, fund_code)}
 
 
 @router.post("/{fund_code}/sync-nav")

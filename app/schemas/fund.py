@@ -26,3 +26,14 @@ class FundNavOut(BaseModel):
     accumulated_nav: Decimal | None = None
     daily_return: Decimal | None = None
     source: str | None = None
+
+
+class FundHoldingStockOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    fund_code: str
+    report_date: date
+    stock_code: str
+    stock_name: str
+    weight: Decimal | None = None
+    source: str | None = None
