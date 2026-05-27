@@ -1,0 +1,15 @@
+{
+  "pe_high_percentile": 0.85,
+  "pe_supportive_ceiling": 0.8,
+  "portfolio_concentration": 0.3,
+  "correlation_high": 0.85,
+  "deep_drawdown": -0.25,
+  "high_volatility": 0.35,
+  "near_term_return_1m_overheated": 0.08,
+  "near_term_return_3m_overheated": 0.15,
+  "peer_rank_low": 0.3,
+  "peer_rank_high": 0.7,
+  "portfolio_drawdown_alert": -0.08,
+  "daily_drop_alert": -0.03,
+  "score_drop_alert": 10.0
+}

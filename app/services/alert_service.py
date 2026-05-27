@@ -3,6 +3,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.thresholds import get_thresholds
 from app.db.models import AlertEvent, FundIndicator, FundNav, FundScore, PortfolioPosition
 from app.db.models.fund import FundInfo
 from app.services.portfolio_service import portfolio_drawdown_1m, position_summary
@@ -73,11 +74,14 @@ def _upsert_alert(
 
 
 def generate_alerts(db: Session) -> list[AlertEvent]:
+    thresholds = get_thresholds()
     alerts: list[AlertEvent] = []
 
     # Collect all fund codes so we can look up names in one batch
     latest_navs = db.scalars(
-        select(FundNav).where(FundNav.daily_return <= Decimal("-0.03")).order_by(FundNav.nav_date.desc())
+        select(FundNav)
+        .where(FundNav.daily_return <= Decimal(str(thresholds.daily_drop_alert)))
+        .order_by(FundNav.nav_date.desc())
     ).all()
     seen: set[str] = set()
     nav_codes: list[str] = []
@@ -86,7 +90,13 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
             seen.add(nav.fund_code)
             nav_codes.append(nav.fund_code)
 
-    indicator_list = list(db.scalars(select(FundIndicator).where(FundIndicator.max_drawdown_1y <= Decimal("-0.08"))))
+    indicator_list = list(
+        db.scalars(
+            select(FundIndicator).where(
+                FundIndicator.max_drawdown_1y <= Decimal(str(thresholds.portfolio_drawdown_alert))
+            )
+        )
+    )
 
     scores = db.scalars(select(FundScore).order_by(FundScore.fund_code, FundScore.score_date.desc())).all()
     by_code: dict[str, list[FundScore]] = {}
@@ -110,7 +120,7 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
                 "daily_drop",
                 code,
                 "high",
-                f"{label} 单日跌幅超过 3%",
+                f"{label} 单日跌幅超过 {abs(thresholds.daily_drop_alert):.0%}",
                 f"{nav.nav_date} 日涨跌幅为 {nav.daily_return}",
             )
         )
@@ -132,7 +142,7 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
     # Score drop alerts
     for fund_code, items in by_code.items():
         if len(items) >= 2 and items[0].total_score is not None and items[1].total_score is not None:
-            if items[1].total_score - items[0].total_score >= Decimal("10"):
+            if items[1].total_score - items[0].total_score >= Decimal(str(thresholds.score_drop_alert)):
                 label = _fund_label(fund_code, name_map)
                 alerts.append(
                     _upsert_alert(
@@ -140,7 +150,7 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
                         "score_drop",
                         fund_code,
                         "medium",
-                        f"{label} 评分下降超过 10 分",
+                        f"{label} 评分下降超过 {thresholds.score_drop_alert:.0f} 分",
                         f"评分由 {items[1].total_score} 降至 {items[0].total_score}",
                     )
                 )
@@ -153,7 +163,7 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
         pos_name_map = _build_name_map(db, pos_codes)
         for summary in summaries:
             value = summary["current_value"] or Decimal("0")
-            if value / total > Decimal("0.30"):
+            if value / total > Decimal(str(thresholds.portfolio_concentration)):
                 code = summary["position"].fund_code
                 label = _fund_label(code, pos_name_map)
                 alerts.append(
@@ -162,20 +172,20 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
                         "position_weight",
                         code,
                         "medium",
-                        f"{label} 持仓占比超过 30%",
+                        f"{label} 持仓占比超过 {thresholds.portfolio_concentration:.0%}",
                         f"当前估算占比为 {(value / total):.2%}",
                     )
                 )
 
     drawdown_1m = portfolio_drawdown_1m(db)
-    if drawdown_1m is not None and drawdown_1m <= Decimal("-0.08"):
+    if drawdown_1m is not None and drawdown_1m <= Decimal(str(thresholds.portfolio_drawdown_alert)):
         alerts.append(
             _upsert_alert(
                 db,
                 "portfolio_drawdown",
                 None,
                 "medium",
-                "组合近 1 月回撤超过 8%",
+                f"组合近 1 月回撤超过 {abs(thresholds.portfolio_drawdown_alert):.0%}",
                 f"当前估算近 1 月组合最大回撤为 {drawdown_1m:.2%}",
             )
         )
@@ -206,4 +216,3 @@ def update_alert_status(db: Session, alert_id: int, status: str) -> AlertEvent |
     db.commit()
     db.refresh(alert)
     return alert
-

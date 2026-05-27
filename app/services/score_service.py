@@ -6,6 +6,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.thresholds import get_thresholds
 from app.db.models import FundInfo, FundIndicator, FundNav, FundScore, Watchlist
 from app.services.indicator_service import latest_indicator
 from app.services.nav_service import decimal_or_none
@@ -127,6 +128,7 @@ def _trade_blocked(fund: FundInfo | None) -> bool:
 
 
 def _score_trend(ret_1m: float | None, ret_3m: float | None, ret_6m: float | None) -> tuple[int, list[str], list[str]]:
+    thresholds = get_thresholds()
     reasons: list[str] = []
     flags: list[str] = []
     if ret_1m is None and ret_3m is None and ret_6m is None:
@@ -141,7 +143,12 @@ def _score_trend(ret_1m: float | None, ret_3m: float | None, ret_6m: float | Non
         trend_score += 2
     trend_score = min(trend_score, 8)
 
-    if ret_1m is not None and ret_3m is not None and ret_1m > 0.08 and ret_3m > 0.15:
+    if (
+        ret_1m is not None
+        and ret_3m is not None
+        and ret_1m > thresholds.near_term_return_1m_overheated
+        and ret_3m > thresholds.near_term_return_3m_overheated
+    ):
         flags.append("near_term_overheated")
         reasons.append("近1月和近3月涨幅偏快，存在追高风险")
     elif ret_1m is not None and ret_3m is not None and ret_1m < 0 and ret_3m < 0:
@@ -237,19 +244,20 @@ def _buy_window_signal(
     drawdown: float | None,
     volatility: float | None,
 ) -> tuple[str, str]:
+    thresholds = get_thresholds()
     if _trade_blocked(fund):
         return "blocked", "交易状态显示当前不具备申购条件，窗口信号被阻断"
     if confidence_score < 55 or "stale_nav" in risk_flags or "stale_indicator" in risk_flags:
         return "cautious", "数据可信度不足或数据偏旧，当前仅适合谨慎观察"
     if "key_metric_missing" in risk_flags:
         return "cautious", "关键指标不完整，高等级窗口信号被降级"
-    if drawdown is not None and drawdown <= -0.25:
+    if drawdown is not None and drawdown <= thresholds.deep_drawdown:
         return "cautious", "历史回撤偏深，即使分数较高也需要控制风险"
     if "near_term_overheated" in risk_flags:
         return "wait_pullback", "近期涨幅偏快，等待回撤或趋势确认更稳妥"
     if ret_1m is not None and ret_3m is not None and ret_1m < 0 and ret_3m < 0:
         return "wait_pullback", "短中期趋势转弱，等待趋势修复"
-    if volatility is not None and volatility >= 0.35:
+    if volatility is not None and volatility >= thresholds.high_volatility:
         return "cautious", "波动率偏高，窗口信号保持谨慎"
     if total_score >= 85 and confidence_score >= 80:
         return "favorable", "质量分、可信度和近期状态共同支持较好的观察窗口"
@@ -291,6 +299,7 @@ def _market_signal(
     watchlist: Watchlist | None = None,
     context: list[dict] | None = None,
 ) -> dict:
+    thresholds = get_thresholds()
     context = context if context is not None else market_service.latest_market_context(db)
     profile = _fund_profile_context(db, fund, watchlist)
     valuation_index_code = profile.get("valuation_index_code")
@@ -321,7 +330,7 @@ def _market_signal(
     avg_return = sum(float(item) for item in returns) / len(returns)
     valuation_name = profile.get("valuation_index_name") or "匹配指数"
     valuation_text = f"，{valuation_name} PE 百分位约 {pe_percentile:.0%}" if pe_percentile is not None else ""
-    if pe_percentile is not None and pe_percentile >= 0.85:
+    if pe_percentile is not None and pe_percentile >= thresholds.pe_high_percentile:
         return {
             "market_signal": "weak",
             "market_reason": f"{valuation_name} PE 百分位偏高{valuation_text}，窗口信号需要降级观察",
@@ -347,6 +356,7 @@ def _market_signal(
 
 
 def _market_fit(peer_group: str | None, market: dict) -> dict:
+    thresholds = get_thresholds()
     group = peer_group or "未分类"
     market_signal = market.get("market_signal")
     pe_percentile = market.get("market_pe_percentile")
@@ -388,14 +398,18 @@ def _market_fit(peer_group: str | None, market: dict) -> dict:
             "market_fit_risk_flags": [],
         }
     if group in equity_like_groups:
-        if market_signal == "supportive" and (pe_percentile is None or pe_percentile < 0.80):
+        if market_signal == "supportive" and (pe_percentile is None or pe_percentile < thresholds.pe_supportive_ceiling):
             return {
                 "market_fit_level": "high",
                 "market_fit_reason": f"{group} 对权益市场环境较敏感，当前市场信号对窗口形成支持",
                 "market_fit_risk_flags": [],
             }
         if market_signal == "weak":
-            valuation_text = "，且估值百分位偏高" if pe_percentile is not None and pe_percentile >= 0.85 else ""
+            valuation_text = (
+                "，且估值百分位偏高"
+                if pe_percentile is not None and pe_percentile >= thresholds.pe_high_percentile
+                else ""
+            )
             return {
                 "market_fit_level": "low",
                 "market_fit_reason": f"{group} 对权益市场环境较敏感，当前市场偏弱{valuation_text}，不宜放大窗口信号",
@@ -414,6 +428,7 @@ def _portfolio_fit(
     portfolio_overview: dict | None = None,
     high_correlation_pairs: list[dict] | None = None,
 ) -> dict:
+    thresholds = get_thresholds()
     fund_code = fund_code.zfill(6)
     overview = portfolio_overview or portfolio_service.portfolio_overview(db)
     total_value = overview["total_value"]
@@ -433,7 +448,7 @@ def _portfolio_fit(
         score -= 25
         reasons.append(f"该基金已在组合中，当前估算权重约 {held_weight:.1%}")
         flags.append("already_held")
-        if held_weight >= 0.30:
+        if held_weight >= thresholds.portfolio_concentration:
             score -= 20
             reasons.append("持仓权重偏高，继续加仓会放大集中度")
             flags.append("portfolio_concentration")
@@ -570,10 +585,11 @@ def _peer_comparison(
         }
 
     percentile = round(sum(metrics) / len(metrics), 4)
-    if percentile >= 0.70:
+    thresholds = get_thresholds()
+    if percentile >= thresholds.peer_rank_high:
         reason = f"在 {peer_group} 同类基金中综合百分位较高"
         flags: list[str] = []
-    elif percentile <= 0.30:
+    elif percentile <= thresholds.peer_rank_low:
         reason = f"在 {peer_group} 同类基金中综合百分位偏低"
         flags = ["peer_rank_low"]
     else:

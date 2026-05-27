@@ -4,6 +4,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.thresholds import get_thresholds
 from app.db.models import FundNav, PortfolioPosition, PortfolioTransaction
 from app.db.models.fund import FundInfo
 from app.services.nav_service import latest_nav
@@ -219,6 +220,7 @@ def portfolio_drawdown_1m(db: Session) -> Decimal | None:
 
 
 def portfolio_diagnosis(db: Session) -> dict:
+    thresholds = get_thresholds()
     overview = portfolio_overview(db)
     positions = overview["positions"]
     max_weight = overview["max_weight"]
@@ -226,7 +228,7 @@ def portfolio_diagnosis(db: Session) -> dict:
     risk_items = []
     stale_positions = [item for item in positions if item["latest_nav"] is None]
 
-    if max_weight is not None and max_weight >= Decimal("0.30"):
+    if max_weight is not None and max_weight >= Decimal(str(thresholds.portfolio_concentration)):
         risk_items.append(
             {
                 "level": "medium",
@@ -234,7 +236,7 @@ def portfolio_diagnosis(db: Session) -> dict:
                 "description": f"单只基金估算占比达到 {max_weight:.2%}，建议重点观察该基金波动对组合的影响。",
             }
         )
-    if drawdown_1m is not None and drawdown_1m <= Decimal("-0.08"):
+    if drawdown_1m is not None and drawdown_1m <= Decimal(str(thresholds.portfolio_drawdown_alert)):
         risk_items.append(
             {
                 "level": "medium",
@@ -290,6 +292,7 @@ def _fund_name_map(db: Session, codes: list[str]) -> dict[str, str]:
 
 
 def simulate_buy(db: Session, fund_code: str, amount: Decimal) -> dict:
+    thresholds = get_thresholds()
     fund_code = fund_code.zfill(6)
     amount = Decimal(amount)
     if amount <= 0:
@@ -307,7 +310,7 @@ def simulate_buy(db: Session, fund_code: str, amount: Decimal) -> dict:
     target_weight_after = after_values.get(fund_code, Decimal("0")) / total_after if total_after else Decimal("1")
 
     current_codes = sorted(before_values)
-    high_corr_threshold = Decimal("0.85")
+    high_corr_threshold = Decimal(str(thresholds.correlation_high))
     corr_pairs = []
     avg_correlation = None
     max_correlation = None
@@ -351,7 +354,7 @@ def simulate_buy(db: Session, fund_code: str, amount: Decimal) -> dict:
             avg_correlation = (sum(correlations, Decimal("0")) / Decimal(len(correlations))).quantize(Decimal("0.0001"))
 
     risk_items = []
-    if max_weight_after is not None and max_weight_after >= Decimal("0.30"):
+    if max_weight_after is not None and max_weight_after >= Decimal(str(thresholds.portfolio_concentration)):
         risk_items.append(
             {
                 "level": "medium",
@@ -359,7 +362,7 @@ def simulate_buy(db: Session, fund_code: str, amount: Decimal) -> dict:
                 "description": f"买入后单只基金最大占比约 {max_weight_after:.2%}，需要关注组合对单一基金波动的敏感度。",
             }
         )
-    if target_weight_after >= Decimal("0.30"):
+    if target_weight_after >= Decimal(str(thresholds.portfolio_concentration)):
         risk_items.append(
             {
                 "level": "medium",

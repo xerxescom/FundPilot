@@ -6,6 +6,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.thresholds import get_thresholds
 from app.db.models import FundNav, Watchlist
 from app.db.models.fund import FundInfo
 from app.services.alert_service import _upsert_alert
@@ -48,7 +49,8 @@ def _build_name_map(db: Session, codes: list[str]) -> dict[str, str]:
     return {info.fund_code: info.fund_name for info in infos}
 
 
-def high_correlation_pairs(db: Session, threshold: Decimal = Decimal("0.85")) -> list[dict]:
+def high_correlation_pairs(db: Session, threshold: Decimal | None = None) -> list[dict]:
+    threshold = threshold if threshold is not None else Decimal(str(get_thresholds().correlation_high))
     corr = calculate_correlation(db)
     pairs = []
     if corr.empty:
@@ -85,4 +87,3 @@ def generate_correlation_alerts(db: Session) -> list:
             )
         )
     return alerts
-
