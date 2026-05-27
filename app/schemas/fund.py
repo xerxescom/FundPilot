@@ -13,6 +13,7 @@ class FundInfoOut(BaseModel):
     fund_company: str | None = None
     fund_manager: str | None = None
     fund_size: Decimal | None = None
+    tracking_index: str | None = None
     source: str | None = None
 
 

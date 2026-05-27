@@ -194,6 +194,10 @@
             :value="marketText(score?.market_signal)"
             :hint="marketHint(score)"
           />
+          <MetricCard label="跟踪指数" :value="score?.tracking_index || '暂无'" :hint="exposureSourceText(score?.industry_exposure_source)" />
+          <MetricCard label="匹配估值指数" :value="score?.valuation_index_name || '暂无'" :hint="score?.valuation_index_code || '暂无'" />
+          <MetricCard label="指数 PE 百分位" :value="percentileText(score?.market_pe_percentile) || '暂无'" :hint="peHint(score)" />
+          <MetricCard label="行业暴露来源" :value="exposureSourceText(score?.industry_exposure_source)" :hint="score?.industry_exposure || '暂无'" />
           <MetricCard label="同类排名" :value="peerText(score)" :hint="peerHint(score)" />
           <MetricCard label="组合适配" :value="fitText(score?.portfolio_fit_level)" :hint="score?.portfolio_fit_reason" />
         </div>
@@ -436,6 +440,17 @@ function percentileText(value?: number | null) {
 function marketHint(row?: Score | null) {
   const percentile = percentileText(row?.market_pe_percentile);
   return [percentile, row?.market_reason, row?.market_fit_reason].filter(Boolean).join("；") || "暂无";
+}
+
+function peHint(row?: Score | null) {
+  const pe = row?.market_pe_ttm === null || row?.market_pe_ttm === undefined ? "" : `PE TTM ${Number(row.market_pe_ttm).toFixed(2)}`;
+  const date = row?.market_valuation_date ? `估值日期 ${row.market_valuation_date}` : "";
+  return [pe, date].filter(Boolean).join("；") || "暂无";
+}
+
+function exposureSourceText(source?: Score["industry_exposure_source"] | null) {
+  const labels = { tracking_index: "跟踪指数", holding: "持仓", name_inference: "名称推断" };
+  return source ? labels[source] : "暂无";
 }
 
 function peerText(row?: Score | null) {

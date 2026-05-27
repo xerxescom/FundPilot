@@ -39,3 +39,16 @@ class FundNav(Base):
     daily_return: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     source: Mapped[str | None] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class FundHoldingIndustry(Base):
+    __tablename__ = "fund_holding_industry"
+    __table_args__ = (UniqueConstraint("fund_code", "report_date", "industry", name="uq_fund_holding_industry"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fund_code: Mapped[str] = mapped_column(String(20), index=True)
+    report_date: Mapped[date] = mapped_column(Date, index=True)
+    industry: Mapped[str] = mapped_column(String(100), index=True)
+    weight: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    source: Mapped[str | None] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

@@ -4,6 +4,7 @@ import pandas as pd
 from loguru import logger
 
 from app.data_source.base import FundDataSource
+from app.services.fund_profile_service import infer_tracking_index
 
 
 class AkshareFundDataSource(FundDataSource):
@@ -26,6 +27,7 @@ class AkshareFundDataSource(FundDataSource):
                 "fund_code": fund_code,
                 "fund_name": str(row.get(name_col, fund_code)),
                 "fund_type": str(row.get(type_col, "")) if type_col else None,
+                "tracking_index": infer_tracking_index(str(row.get(name_col, fund_code)), str(row.get(type_col, "")) if type_col else None),
                 "source": self.source_name,
             }
         except Exception as exc:
@@ -34,6 +36,7 @@ class AkshareFundDataSource(FundDataSource):
                 "fund_code": fund_code,
                 "fund_name": fund_code,
                 "fund_type": None,
+                "tracking_index": None,
                 "source": self.source_name,
             }
 
@@ -77,6 +80,52 @@ class AkshareFundDataSource(FundDataSource):
             logger.warning("Failed to fetch fund rank list: {}", exc)
             return pd.DataFrame()
 
+    def get_fund_holding_industries(self, fund_code: str) -> pd.DataFrame:
+        fund_code = fund_code.zfill(6)
+        try:
+            import akshare as ak
+        except Exception as exc:
+            logger.warning("Failed to import akshare for fund holdings {}: {}", fund_code, exc)
+            return pd.DataFrame()
+
+        frames: list[pd.DataFrame] = []
+        for year in range(pd.Timestamp.today().year, pd.Timestamp.today().year - 3, -1):
+            try:
+                raw = ak.fund_portfolio_hold_em(symbol=fund_code, date=str(year))
+            except Exception as exc:
+                logger.warning("Failed to fetch fund holdings for {} {}: {}", fund_code, year, exc)
+                continue
+            if raw is None or raw.empty:
+                continue
+            industry_col = self._pick_optional_column(raw, ["行业", "所属行业", "申万行业", "industry"])
+            weight_col = self._pick_optional_column(raw, ["占净值比例", "持仓占比", "占比", "weight"])
+            report_col = self._pick_optional_column(raw, ["季度", "报告期", "报告日期", "date"])
+            if not industry_col or not weight_col:
+                continue
+            frame = pd.DataFrame(
+                {
+                    "fund_code": fund_code,
+                    "industry": raw[industry_col].astype(str),
+                    "weight": self._normalize_return(raw[weight_col]),
+                    "report_date": pd.to_datetime(raw[report_col], errors="coerce").dt.date if report_col else None,
+                    "source": self.source_name,
+                }
+            )
+            frames.append(frame)
+
+        if not frames:
+            return pd.DataFrame()
+        rows = pd.concat(frames, ignore_index=True)
+        rows = rows.dropna(subset=["industry", "weight"])
+        if rows.empty:
+            return pd.DataFrame()
+        if "report_date" not in rows.columns or rows["report_date"].isna().all():
+            rows["report_date"] = pd.Timestamp.today().date()
+        latest_date = rows["report_date"].dropna().max()
+        latest = rows[rows["report_date"] == latest_date]
+        grouped = latest.groupby(["fund_code", "report_date", "industry", "source"], as_index=False)["weight"].sum()
+        return grouped.sort_values("weight", ascending=False).reset_index(drop=True)
+
     def get_market_index_history(self, index_code: str) -> pd.DataFrame:
         try:
             import akshare as ak
@@ -108,6 +157,11 @@ class AkshareFundDataSource(FundDataSource):
         symbol_map = {
             "sh000300": "沪深300",
             "sh000905": "中证500",
+            "sh000852": "中证1000",
+            "sz399006": "创业板",
+            "sh000016": "上证50",
+            "sh000001": "上证",
+            "sh000688": "科创50",
         }
         symbol = symbol_map.get(index_code, index_name)
         try:

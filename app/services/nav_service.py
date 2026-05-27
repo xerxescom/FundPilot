@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.data_source.akshare_client import AkshareFundDataSource
 from app.data_source.eastmoney_client import EastmoneyFundDataSource
 from app.db.models import FundInfo, FundNav, Watchlist
+from app.services.fund_profile_service import infer_tracking_index
 
 SOURCE_RETRY_COUNT = 2
 
@@ -25,12 +26,16 @@ def ensure_fund_info(db: Session, fund_code: str) -> FundInfo:
     fund_code = fund_code.zfill(6)
     existing = db.scalar(select(FundInfo).where(FundInfo.fund_code == fund_code))
     if existing:
+        if not existing.tracking_index:
+            existing.tracking_index = infer_tracking_index(existing.fund_name, existing.fund_type)
+            db.commit()
         return existing
     data = AkshareFundDataSource().get_fund_info(fund_code)
     fund = FundInfo(
         fund_code=fund_code,
         fund_name=data.get("fund_name") or fund_code,
         fund_type=data.get("fund_type"),
+        tracking_index=data.get("tracking_index") or infer_tracking_index(data.get("fund_name"), data.get("fund_type")),
         source=data.get("source"),
     )
     db.add(fund)

@@ -210,7 +210,8 @@ function percentileText(value?: number | null) {
 
 function marketFitText(row: Score) {
   const labels = { high: "主题匹配高", medium: "主题匹配中", low: "主题匹配低" };
-  return row.market_fit_level ? labels[row.market_fit_level] : "";
+  const fit = row.market_fit_level ? labels[row.market_fit_level] : "";
+  return [row.valuation_index_name, fit].filter(Boolean).join(" · ");
 }
 
 function peerText(row: Score) {

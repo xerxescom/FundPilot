@@ -14,8 +14,11 @@ from app.services.task_log_service import run_logged
 DEFAULT_MARKET_INDEXES = {
     "sh000300": "沪深300",
     "sh000905": "中证500",
+    "sh000852": "中证1000",
     "sz399006": "创业板指",
+    "sh000016": "上证50",
     "sh000001": "上证指数",
+    "sh000688": "科创50",
 }
 
 

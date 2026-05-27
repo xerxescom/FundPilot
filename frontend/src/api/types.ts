@@ -33,8 +33,15 @@ export interface Score {
   market_signal?: Nullable<"supportive" | "neutral" | "weak">;
   market_reason?: Nullable<string>;
   market_pe_percentile?: Nullable<number>;
+  market_pe_ttm?: Nullable<number>;
+  market_valuation_date?: Nullable<string>;
   market_fit_level?: Nullable<"high" | "medium" | "low">;
   market_fit_reason?: Nullable<string>;
+  tracking_index?: Nullable<string>;
+  valuation_index_code?: Nullable<string>;
+  valuation_index_name?: Nullable<string>;
+  industry_exposure_source?: Nullable<"tracking_index" | "holding" | "name_inference">;
+  industry_exposure?: Nullable<string>;
   peer_group?: Nullable<string>;
   peer_group_size?: Nullable<number>;
   peer_percentile?: Nullable<number>;

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.models import FundInfo, FundIndicator, FundNav, FundScore, Watchlist
 from app.services.indicator_service import latest_indicator
 from app.services.nav_service import decimal_or_none
-from app.services import correlation_service, market_service, portfolio_service
+from app.services import correlation_service, fund_profile_service, holding_service, market_service, portfolio_service
 
 SCORE_STRATEGIES = {
     "default": {
@@ -258,45 +258,91 @@ def _buy_window_signal(
     return "cautious", "综合评分尚未形成足够支持，当前以谨慎观察为主"
 
 
-def _market_signal(db: Session) -> dict:
-    context = market_service.latest_market_context(db)
-    returns = [item["return_1m"] for item in context if item.get("return_1m") is not None]
-    pe_percentiles = [item["pe_percentile"] for item in context if item.get("pe_percentile") is not None]
-    avg_pe_percentile = (
-        sum(float(item) for item in pe_percentiles) / len(pe_percentiles) if pe_percentiles else None
+def _watchlist_for(db: Session, fund_code: str) -> Watchlist | None:
+    return db.scalar(
+        select(Watchlist)
+        .where(Watchlist.fund_code == fund_code.zfill(6), Watchlist.is_active.is_(True))
+        .order_by(Watchlist.created_at.desc())
+        .limit(1)
     )
+
+
+def _fund_profile_context(db: Session, fund: FundInfo | None, watchlist: Watchlist | None) -> dict:
+    original_tracking_index = fund.tracking_index if fund else None
+    profile = fund_profile_service.match_valuation_index(fund, watchlist)
+    if fund and fund.tracking_index and fund.tracking_index != original_tracking_index:
+        db.commit()
+    if fund and profile.get("industry_exposure_source") != "tracking_index":
+        holdings = holding_service.latest_holding_industries(db, fund.fund_code)
+        if holdings:
+            top = holdings[0]
+            profile["industry_exposure_source"] = "holding"
+            profile["industry_exposure"] = top.industry
+            if not profile.get("valuation_index_code") and top.industry in fund_profile_service.INDUSTRY_VALUATION_FALLBACK:
+                code, name = fund_profile_service.INDUSTRY_VALUATION_FALLBACK[top.industry]
+                profile["valuation_index_code"] = code
+                profile["valuation_index_name"] = name
+    return profile
+
+
+def _market_signal(
+    db: Session,
+    fund: FundInfo | None = None,
+    watchlist: Watchlist | None = None,
+    context: list[dict] | None = None,
+) -> dict:
+    context = context if context is not None else market_service.latest_market_context(db)
+    profile = _fund_profile_context(db, fund, watchlist)
+    valuation_index_code = profile.get("valuation_index_code")
+    valuation_item = next(
+        (item for item in context if valuation_index_code and item.get("index_code") == valuation_index_code),
+        None,
+    )
+    returns = [item["return_1m"] for item in context if item.get("return_1m") is not None]
+    pe_percentile = valuation_item.get("pe_percentile") if valuation_item else None
+    pe_ttm = valuation_item.get("pe_ttm") if valuation_item else None
+    valuation_date = valuation_item.get("valuation_date") if valuation_item else None
+    base_fields = {
+        "market_pe_percentile": pe_percentile,
+        "market_pe_ttm": pe_ttm,
+        "market_valuation_date": valuation_date,
+        "tracking_index": profile.get("tracking_index"),
+        "valuation_index_code": valuation_index_code,
+        "valuation_index_name": profile.get("valuation_index_name"),
+        "industry_exposure_source": profile.get("industry_exposure_source"),
+        "industry_exposure": profile.get("industry_exposure"),
+    }
     if not returns:
         return {
             "market_signal": "neutral",
             "market_reason": "市场环境数据不足，窗口信号不做市场加成",
-            "market_pe_percentile": avg_pe_percentile,
+            **base_fields,
         }
     avg_return = sum(float(item) for item in returns) / len(returns)
-    valuation_text = (
-        f"，平均 PE 百分位约 {avg_pe_percentile:.0%}" if avg_pe_percentile is not None else ""
-    )
-    if avg_pe_percentile is not None and avg_pe_percentile >= 0.85:
+    valuation_name = profile.get("valuation_index_name") or "匹配指数"
+    valuation_text = f"，{valuation_name} PE 百分位约 {pe_percentile:.0%}" if pe_percentile is not None else ""
+    if pe_percentile is not None and pe_percentile >= 0.85:
         return {
             "market_signal": "weak",
-            "market_reason": f"主要指数 PE 百分位偏高{valuation_text}，窗口信号需要降级观察",
-            "market_pe_percentile": avg_pe_percentile,
+            "market_reason": f"{valuation_name} PE 百分位偏高{valuation_text}，窗口信号需要降级观察",
+            **base_fields,
         }
     if avg_return >= 0.03:
         return {
             "market_signal": "supportive",
             "market_reason": f"主要指数近1月整体偏强{valuation_text}，对窗口信号形成支持",
-            "market_pe_percentile": avg_pe_percentile,
+            **base_fields,
         }
     if avg_return <= -0.03:
         return {
             "market_signal": "weak",
             "market_reason": f"主要指数近1月整体偏弱{valuation_text}，窗口信号需要降级观察",
-            "market_pe_percentile": avg_pe_percentile,
+            **base_fields,
         }
     return {
         "market_signal": "neutral",
         "market_reason": f"主要指数近1月表现中性{valuation_text}，市场环境不构成明显加减分",
-        "market_pe_percentile": avg_pe_percentile,
+        **base_fields,
     }
 
 
@@ -940,6 +986,7 @@ def score_payload(
     db: Session,
     fund_code: str,
     market: dict | None = None,
+    market_context: list[dict] | None = None,
     portfolio_overview: dict | None = None,
     high_correlation_pairs: list[dict] | None = None,
     peer_rows: list | None = None,
@@ -975,7 +1022,7 @@ def score_payload(
         )
     return _apply_context(
         payload,
-        market or _market_signal(db),
+        market or _market_signal(db, fund, _watchlist_for(db, fund_code), market_context),
         _portfolio_fit(db, fund_code, portfolio_overview, high_correlation_pairs),
         _peer_comparison(db, fund_code, indicator, fund, peer_rows),
     )
@@ -1017,7 +1064,7 @@ def top_scores(db: Session, limit: int = 20) -> list[FundScore]:
 
 
 def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 20) -> list[dict]:
-    market = _market_signal(db)
+    market_context = market_service.latest_market_context(db)
     portfolio_overview = portfolio_service.portfolio_overview(db)
     high_correlation_pairs = correlation_service.high_correlation_pairs(db)
     peer_rows = _peer_source_rows(db)
@@ -1026,7 +1073,14 @@ def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 
         rows = []
         for item in top_scores(db, limit):
             payload = (
-                score_payload(db, item.fund_code, market, portfolio_overview, high_correlation_pairs, peer_rows)
+                score_payload(
+                    db,
+                    item.fund_code,
+                    market_context=market_context,
+                    portfolio_overview=portfolio_overview,
+                    high_correlation_pairs=high_correlation_pairs,
+                    peer_rows=peer_rows,
+                )
                 or _score_to_dict(item)
             )
             payload.update(
@@ -1064,6 +1118,7 @@ def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 
         scored = []
         for indicator, fund in rows:
             peer = _peer_comparison(db, indicator.fund_code, indicator, fund, peer_rows)
+            market = _market_signal(db, fund, _watchlist_for(db, indicator.fund_code), market_context)
             base = score_indicator(indicator, fund, _nav_stats(db, indicator.fund_code))
             item = _apply_peer_relative_strategy(base, indicator, fund, peer)
             item = _apply_context(
@@ -1084,6 +1139,7 @@ def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 
 
     scored = []
     for indicator, fund in rows:
+        market = _market_signal(db, fund, _watchlist_for(db, indicator.fund_code), market_context)
         item = score_indicator_with_strategy(indicator, fund, strategy, _nav_stats(db, indicator.fund_code))
         item = _apply_context(
             item,

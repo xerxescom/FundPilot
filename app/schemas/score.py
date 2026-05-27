@@ -27,8 +27,15 @@ class ScoreOut(BaseModel):
     market_signal: str | None = None
     market_reason: str | None = None
     market_pe_percentile: Decimal | None = None
+    market_pe_ttm: Decimal | None = None
+    market_valuation_date: date | None = None
     market_fit_level: str | None = None
     market_fit_reason: str | None = None
+    tracking_index: str | None = None
+    valuation_index_code: str | None = None
+    valuation_index_name: str | None = None
+    industry_exposure_source: str | None = None
+    industry_exposure: str | None = None
     peer_group: str | None = None
     peer_group_size: int | None = None
     peer_percentile: Decimal | None = None

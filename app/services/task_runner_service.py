@@ -6,7 +6,7 @@ from typing import Callable
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
-from app.services import alert_service, indicator_service, market_service, nav_service, score_service
+from app.services import alert_service, holding_service, indicator_service, market_service, nav_service, score_service
 from app.services.ai.report_service import generate_daily_report
 from app.services.task_log_service import record_task_log, result_counts, run_logged, update_task_log
 
@@ -16,6 +16,7 @@ def _task_factories(db: Session) -> dict[str, Callable[[], object]]:
         "sync_watchlist_nav": lambda: nav_service.sync_watchlist_nav(db),
         "calc_indicators": lambda: indicator_service.calculate_watchlist_indicators(db),
         "calc_scores": lambda: score_service.calculate_watchlist_scores(db),
+        "sync_holding_industries": lambda: holding_service.sync_watchlist_holding_industries(db),
         "generate_alerts": lambda: [alert.title for alert in alert_service.generate_alerts(db)],
         "sync_market_context": lambda: market_service.sync_market_context(db),
         "generate_daily_report": lambda: str(generate_daily_report(db).id),
@@ -94,6 +95,12 @@ def available_tasks() -> list[dict[str, str]]:
             "description": "计算全部自选基金评分",
             "priority": "P1",
             "scenario": "多策略基金评分体系的默认评分基础",
+        },
+        {
+            "task_name": "sync_holding_industries",
+            "description": "同步基金持仓行业",
+            "priority": "P2",
+            "scenario": "基金估值匹配和行业暴露解释",
         },
         {
             "task_name": "generate_alerts",

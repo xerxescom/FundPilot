@@ -1,6 +1,6 @@
 from app.db.models.alert import AlertEvent
 from app.db.models.ai_report import AIReport
-from app.db.models.fund import FundInfo, FundNav
+from app.db.models.fund import FundHoldingIndustry, FundInfo, FundNav
 from app.db.models.indicator import FundIndicator
 from app.db.models.market import MarketIndexDaily, MarketValuationDaily
 from app.db.models.portfolio import PortfolioPosition, PortfolioTransaction
@@ -12,6 +12,7 @@ __all__ = [
     "AIReport",
     "AlertEvent",
     "FundIndicator",
+    "FundHoldingIndustry",
     "FundInfo",
     "FundNav",
     "FundScore",
