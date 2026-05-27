@@ -29,11 +29,11 @@ defineProps<{
 
 .metric-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 30px 0 rgba(31, 38, 135, 0.08);
+  box-shadow: var(--glass-shadow-hover);
 }
 
 .metric-label {
-  color: #64748b;
+  color: var(--color-muted);
   font-size: 13px;
 }
 
@@ -45,7 +45,7 @@ defineProps<{
 
 .metric-hint {
   margin-top: 5px;
-  color: #64748b;
+  color: var(--color-muted);
   font-size: 12px;
 }
 </style>

@@ -269,7 +269,7 @@ onMounted(async () => {
 .subtle-text {
   display: block;
   margin-top: 3px;
-  color: #64748b;
+  color: var(--color-muted);
   font-size: 12px;
   line-height: 1.35;
 }

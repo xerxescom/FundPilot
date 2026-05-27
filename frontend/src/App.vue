@@ -21,7 +21,11 @@
         <el-tag type="success" effect="plain">FastAPI / Vue 3</el-tag>
       </el-header>
       <el-main class="content">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <Transition name="page" mode="out-in">
+            <component :is="Component" :key="$route.path" />
+          </Transition>
+        </router-view>
       </el-main>
     </el-container>
   </el-container>

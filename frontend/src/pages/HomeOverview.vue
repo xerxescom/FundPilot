@@ -268,6 +268,6 @@ onMounted(load);
 }
 
 .metric-action:hover :deep(.metric-card) {
-  border-color: #2563eb;
+  border-color: var(--color-accent-blue);
 }
 </style>

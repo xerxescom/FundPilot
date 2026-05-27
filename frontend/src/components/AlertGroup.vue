@@ -108,7 +108,7 @@ function onBatch(status: string) {
 .group-empty-hint {
   font-size: 12px;
   font-weight: 400;
-  color: #94a3b8;
+  color: var(--color-muted-light);
 }
 
 .group-toolbar {

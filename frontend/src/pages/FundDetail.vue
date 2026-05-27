@@ -560,14 +560,14 @@ watch(fundCode, loadFund);
 .diagnostics-section,
 .chart-panel,
 .table-section {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
 }
 
 .detail-hero {
   padding: 22px;
-  border-left: 4px solid #2563eb;
+  border-left: 4px solid var(--color-accent-blue);
 }
 
 .hero-main {
@@ -579,7 +579,7 @@ watch(fundCode, loadFund);
 
 .hero-kicker,
 .section-eyebrow {
-  color: #64748b;
+  color: var(--color-muted);
   font-size: 12px;
   font-weight: 720;
   text-transform: uppercase;
@@ -595,14 +595,14 @@ watch(fundCode, loadFund);
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  color: #64748b;
+  color: var(--color-muted);
   font-size: 13px;
 }
 
 .fund-meta span + span::before {
   content: "/";
   margin-right: 8px;
-  color: #cbd5e1;
+  color: var(--color-border-muted);
 }
 
 .hero-score {
@@ -611,7 +611,7 @@ watch(fundCode, loadFund);
 }
 
 .hero-score-label {
-  color: #64748b;
+  color: var(--color-muted);
   font-size: 13px;
 }
 
@@ -627,21 +627,21 @@ watch(fundCode, loadFund);
   gap: 1px;
   margin-top: 20px;
   overflow: hidden;
-  background: #e5e7eb;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--color-border);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
 }
 
 .fact-item {
   min-height: 86px;
   padding: 14px;
-  background: #f8fafc;
+  background: var(--color-surface-alt);
 }
 
 .fact-item span,
 .signal-grid span {
   display: block;
-  color: #64748b;
+  color: var(--color-muted);
   font-size: 12px;
 }
 
@@ -656,7 +656,7 @@ watch(fundCode, loadFund);
 .signal-grid small {
   display: block;
   margin-top: 5px;
-  color: #64748b;
+  color: var(--color-muted);
   line-height: 1.5;
 }
 
@@ -671,11 +671,11 @@ watch(fundCode, loadFund);
 }
 
 .signal-panel {
-  border-left: 4px solid #10b981;
+  border-left: 4px solid var(--color-accent-green);
 }
 
 .progress-panel {
-  border-left: 4px solid #8b5cf6;
+  border-left: 4px solid var(--color-accent-purple);
 }
 
 .module-heading,
@@ -693,7 +693,7 @@ watch(fundCode, loadFund);
 
 .decision-text {
   margin: 14px 0 16px;
-  color: #334155;
+  color: var(--color-text-secondary);
   line-height: 1.7;
 }
 
@@ -705,9 +705,9 @@ watch(fundCode, loadFund);
 
 .signal-grid > div {
   padding: 13px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
 }
 
 .progress-steps {
@@ -722,14 +722,14 @@ watch(fundCode, loadFund);
 
 .insight-panel {
   padding: 16px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-left: 4px solid #0ea5e9;
-  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-accent-sky);
+  border-radius: var(--radius-md);
 }
 
 .risk-panel {
-  border-left-color: #f59e0b;
+  border-left-color: var(--color-accent-amber);
 }
 
 .insight-list {
@@ -743,7 +743,7 @@ watch(fundCode, loadFund);
 .insight-list li {
   position: relative;
   padding-left: 18px;
-  color: #334155;
+  color: var(--color-text-secondary);
   line-height: 1.6;
 }
 
@@ -753,7 +753,7 @@ watch(fundCode, loadFund);
   left: 0;
   width: 7px;
   height: 7px;
-  background: #0ea5e9;
+  background: var(--color-accent-sky);
   border-radius: 50%;
   content: "";
 }
