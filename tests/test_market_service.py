@@ -17,6 +17,23 @@ def test_market_context_empty_database(db_session):
     assert context[0]["close"] is None
 
 
+def test_default_market_indexes_include_industry_references():
+    expected = {
+        "sh000932": "中证消费",
+        "sh000933": "中证医药",
+        "sh000993": "全指信息",
+        "sz399808": "中证新能源",
+        "sz399976": "CS新能车",
+        "sz399986": "中证银行",
+        "sz399967": "中证军工",
+        "sz399971": "中证传媒",
+        "sz399997": "中证白酒",
+    }
+
+    for code, name in expected.items():
+        assert DEFAULT_MARKET_INDEXES[code] == name
+
+
 def test_upsert_market_rows_and_calculate_context(db_session):
     rows = pd.DataFrame(
         [

@@ -12,6 +12,7 @@ from app.services.nav_service import decimal_or_none
 from app.services.task_log_service import run_logged
 
 DEFAULT_MARKET_INDEXES = {
+    # Broad and style benchmarks
     "sh000300": "沪深300",
     "sh000905": "中证500",
     "sh000852": "中证1000",
@@ -19,6 +20,20 @@ DEFAULT_MARKET_INDEXES = {
     "sh000016": "上证50",
     "sh000001": "上证指数",
     "sh000688": "科创50",
+    # Industry and theme valuation references
+    "sh000932": "中证消费",
+    "sh000933": "中证医药",
+    "sh000993": "全指信息",
+    "sh000819": "中证有色",
+    "sh000813": "细分化工",
+    "sz399808": "中证新能源",
+    "sz399976": "CS新能车",
+    "sz399986": "中证银行",
+    "sz399975": "证券公司",
+    "sz399967": "中证军工",
+    "sz399971": "中证传媒",
+    "sz399998": "中证煤炭",
+    "sz399997": "中证白酒",
 }
 
 
