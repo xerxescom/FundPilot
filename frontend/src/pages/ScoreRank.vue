@@ -26,7 +26,25 @@
           :value="level"
         />
       </el-select>
-      <el-slider v-model="minScore" :min="0" :max="100" style="width: 260px" />
+      <el-select v-model="trackingIndexes" multiple collapse-tags collapse-tags-tooltip placeholder="跟踪指数" style="min-width: 220px">
+        <el-option v-for="index in trackingIndexOptions" :key="index" :label="index" :value="index" />
+      </el-select>
+      <el-select v-model="exposureSources" multiple placeholder="暴露来源" style="min-width: 180px">
+        <el-option
+          v-for="source in exposureSourceOptions"
+          :key="source"
+          :label="exposureSourceText(source)"
+          :value="source"
+        />
+      </el-select>
+      <div class="range-filter">
+        <span>PE 百分位</span>
+        <el-slider v-model="peRange" range :min="0" :max="100" :disabled="loading" />
+      </div>
+      <div class="range-filter">
+        <span>最低分</span>
+        <el-slider v-model="minScore" :min="0" :max="100" />
+      </div>
     </div>
     <el-alert
       v-if="currentStrategy?.scenario"
@@ -61,6 +79,14 @@
               {{ marketText(row.market_signal) }} {{ percentileText(row.market_pe_percentile) }}
             </el-tag>
             <small class="subtle-text">{{ marketFitText(row) }}</small>
+          </template>
+        </el-table-column>
+        <el-table-column label="估值匹配" min-width="150">
+          <template #default="{ row }">
+            <div>{{ row.tracking_index || "暂无跟踪指数" }}</div>
+            <small class="subtle-text">
+              {{ row.valuation_index_name || "暂无估值指数" }} · {{ exposureSourceText(row.industry_exposure_source) }}
+            </small>
           </template>
         </el-table-column>
         <el-table-column label="同类排名" min-width="140">
@@ -108,8 +134,11 @@ const selectedStrategy = ref("default");
 const ratings = ref<string[]>([]);
 const signals = ref<NonNullable<Score["buy_window_signal"]>[]>([]);
 const confidenceLevels = ref<NonNullable<Score["confidence_level"]>[]>([]);
+const trackingIndexes = ref<string[]>([]);
+const exposureSources = ref<NonNullable<Score["industry_exposure_source"]>[]>([]);
 const initializedQueryFilters = ref(false);
 const minScore = ref(0);
+const peRange = ref<[number, number]>([0, 100]);
 const strategyOptions = computed(() => strategies.value.map((item) => ({ label: item.name, value: item.key })));
 const currentStrategy = computed(() => strategies.value.find((item) => item.key === selectedStrategy.value));
 const ratingOptions = computed(() => Array.from(new Set(rows.value.map((row) => row.rating).filter(Boolean))) as string[]);
@@ -119,14 +148,35 @@ const signalOptions = computed(
 const confidenceOptions = computed(
   () => Array.from(new Set(rows.value.map((row) => row.confidence_level).filter(Boolean))) as NonNullable<Score["confidence_level"]>[],
 );
+const trackingIndexOptions = computed(
+  () =>
+    Array.from(
+      new Set(rows.value.map((row) => row.tracking_index || row.valuation_index_name).filter(Boolean)),
+    ) as string[],
+);
+const exposureSourceOptions = computed(
+  () =>
+    Array.from(
+      new Set(rows.value.map((row) => row.industry_exposure_source).filter(Boolean)),
+    ) as NonNullable<Score["industry_exposure_source"]>[],
+);
 const filtered = computed(() =>
   rows.value.filter(
-    (row) =>
-      (!ratings.value.length || ratings.value.includes(row.rating || "")) &&
-      (!signals.value.length || signals.value.includes(row.buy_window_signal as NonNullable<Score["buy_window_signal"]>)) &&
-      (!confidenceLevels.value.length ||
-        confidenceLevels.value.includes(row.confidence_level as NonNullable<Score["confidence_level"]>)) &&
-      Number(row.total_score || 0) >= minScore.value,
+    (row) => {
+      const pePercentile = row.market_pe_percentile === null || row.market_pe_percentile === undefined ? null : row.market_pe_percentile * 100;
+      const indexValue = row.tracking_index || row.valuation_index_name || "";
+      return (
+        (!ratings.value.length || ratings.value.includes(row.rating || "")) &&
+        (!signals.value.length || signals.value.includes(row.buy_window_signal as NonNullable<Score["buy_window_signal"]>)) &&
+        (!confidenceLevels.value.length ||
+          confidenceLevels.value.includes(row.confidence_level as NonNullable<Score["confidence_level"]>)) &&
+        (!trackingIndexes.value.length || trackingIndexes.value.includes(indexValue)) &&
+        (!exposureSources.value.length ||
+          exposureSources.value.includes(row.industry_exposure_source as NonNullable<Score["industry_exposure_source"]>)) &&
+        (pePercentile === null || (pePercentile >= peRange.value[0] && pePercentile <= peRange.value[1])) &&
+        Number(row.total_score || 0) >= minScore.value
+      );
+    },
   ),
 );
 const barOption = computed<EChartsOption>(() => ({
@@ -159,8 +209,17 @@ function applyQueryFilters() {
   if (initializedQueryFilters.value) return;
   const querySignals = parseQueryList(route.query.signals) as NonNullable<Score["buy_window_signal"]>[];
   const queryConfidence = parseQueryList(route.query.confidence) as NonNullable<Score["confidence_level"]>[];
+  const queryTracking = parseQueryList(route.query.tracking);
+  const queryExposure = parseQueryList(route.query.exposure) as NonNullable<Score["industry_exposure_source"]>[];
   if (querySignals.length) signals.value = querySignals;
   if (queryConfidence.length) confidenceLevels.value = queryConfidence;
+  if (queryTracking.length) trackingIndexes.value = queryTracking;
+  if (queryExposure.length) exposureSources.value = queryExposure;
+  const peMin = Number(route.query.pe_min);
+  const peMax = Number(route.query.pe_max);
+  if (!Number.isNaN(peMin) || !Number.isNaN(peMax)) {
+    peRange.value = [Number.isNaN(peMin) ? 0 : peMin, Number.isNaN(peMax) ? 100 : peMax];
+  }
   initializedQueryFilters.value = true;
 }
 
@@ -206,6 +265,11 @@ function marketTag(signal?: Score["market_signal"]) {
 
 function percentileText(value?: number | null) {
   return value === null || value === undefined ? "" : `PE ${Math.round(value * 100)}%`;
+}
+
+function exposureSourceText(source?: Score["industry_exposure_source"]) {
+  const labels = { tracking_index: "跟踪指数", holding: "持仓", name_inference: "名称推断" };
+  return source ? labels[source] : "暂无来源";
 }
 
 function marketFitText(row: Score) {
@@ -272,5 +336,15 @@ onMounted(async () => {
   color: var(--color-muted);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.range-filter {
+  display: grid;
+  grid-template-columns: 72px 180px;
+  gap: 10px;
+  align-items: center;
+  min-width: 262px;
+  color: var(--color-muted);
+  font-size: 13px;
 }
 </style>
