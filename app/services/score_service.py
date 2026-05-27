@@ -81,6 +81,7 @@ RISK_FLAG_LABELS = {
     "indicator_missing": "缺少最新指标",
     "key_metric_missing": "关键指标缺失",
     "market_weak": "市场环境偏弱",
+    "market_theme_mismatch": "主题与当前市场环境不匹配",
     "near_term_overheated": "短期涨幅偏快",
     "negative_sharpe": "夏普比率为负",
     "peer_indicator_missing": "缺少同类比较指标",
@@ -296,6 +297,68 @@ def _market_signal(db: Session) -> dict:
         "market_signal": "neutral",
         "market_reason": f"主要指数近1月表现中性{valuation_text}，市场环境不构成明显加减分",
         "market_pe_percentile": avg_pe_percentile,
+    }
+
+
+def _market_fit(peer_group: str | None, market: dict) -> dict:
+    group = peer_group or "未分类"
+    market_signal = market.get("market_signal")
+    pe_percentile = market.get("market_pe_percentile")
+    equity_like_groups = {
+        "宽基",
+        "指数",
+        "混合",
+        "医药",
+        "消费",
+        "科技",
+        "新能源",
+        "新能源车",
+        "金融",
+        "地产",
+        "军工",
+        "传媒",
+        "农业",
+        "周期",
+    }
+    defensive_groups = {"债券", "货币", "黄金", "红利"}
+    offshore_groups = {"海外/QDII", "港股"}
+
+    if group in offshore_groups:
+        return {
+            "market_fit_level": "medium",
+            "market_fit_reason": f"{group} 与当前 A 股主要指数环境相关性有限，市场环境仅作为弱参考",
+            "market_fit_risk_flags": [],
+        }
+    if group in defensive_groups:
+        if market_signal == "weak":
+            return {
+                "market_fit_level": "medium",
+                "market_fit_reason": f"{group} 对权益市场弱势相对不敏感，市场信号不直接阻断窗口",
+                "market_fit_risk_flags": [],
+            }
+        return {
+            "market_fit_level": "medium",
+            "market_fit_reason": f"{group} 主要看利率、信用或避险环境，当前权益市场信号仅作辅助参考",
+            "market_fit_risk_flags": [],
+        }
+    if group in equity_like_groups:
+        if market_signal == "supportive" and (pe_percentile is None or pe_percentile < 0.80):
+            return {
+                "market_fit_level": "high",
+                "market_fit_reason": f"{group} 对权益市场环境较敏感，当前市场信号对窗口形成支持",
+                "market_fit_risk_flags": [],
+            }
+        if market_signal == "weak":
+            valuation_text = "，且估值百分位偏高" if pe_percentile is not None and pe_percentile >= 0.85 else ""
+            return {
+                "market_fit_level": "low",
+                "market_fit_reason": f"{group} 对权益市场环境较敏感，当前市场偏弱{valuation_text}，不宜放大窗口信号",
+                "market_fit_risk_flags": ["market_theme_mismatch"],
+            }
+    return {
+        "market_fit_level": "medium",
+        "market_fit_reason": f"{group} 与市场环境的映射样本有限，暂按中性敏感度处理",
+        "market_fit_risk_flags": [],
     }
 
 
@@ -529,10 +592,12 @@ def _apply_peer_relative_strategy(
     }
 
 
-def _apply_context(payload: dict, market: dict, portfolio: dict, peer: dict) -> dict:
+def _apply_context(payload: dict, market: dict, portfolio: dict, peer: dict, market_fit: dict | None = None) -> dict:
+    market_fit = market_fit or _market_fit(peer.get("peer_group"), market)
     risk_flags = set(payload.get("risk_flags") or [])
     risk_flags.update(portfolio.get("portfolio_risk_flags") or [])
     risk_flags.update(peer.get("peer_risk_flags") or [])
+    risk_flags.update(market_fit.get("market_fit_risk_flags") or [])
     signal = payload.get("buy_window_signal")
     reason = payload.get("buy_window_reason") or ""
 
@@ -556,10 +621,16 @@ def _apply_context(payload: dict, market: dict, portfolio: dict, peer: dict) -> 
         signal = "wait_pullback"
         reason = f"{reason}；同类排名偏低，等待相对表现改善"
 
+    if market_fit["market_fit_level"] == "low" and signal in {"favorable", "watch"}:
+        signal = "watch" if signal == "favorable" else "wait_pullback"
+        reason = f"{reason}；{market_fit['market_fit_reason']}"
+
     sorted_flags = sorted(risk_flags)
     payload.update(
         {
             **market,
+            "market_fit_level": market_fit["market_fit_level"],
+            "market_fit_reason": market_fit["market_fit_reason"],
             "peer_group": peer["peer_group"],
             "peer_group_size": peer["peer_group_size"],
             "peer_percentile": peer["peer_percentile"],

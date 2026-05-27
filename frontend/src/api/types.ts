@@ -33,6 +33,8 @@ export interface Score {
   market_signal?: Nullable<"supportive" | "neutral" | "weak">;
   market_reason?: Nullable<string>;
   market_pe_percentile?: Nullable<number>;
+  market_fit_level?: Nullable<"high" | "medium" | "low">;
+  market_fit_reason?: Nullable<string>;
   peer_group?: Nullable<string>;
   peer_group_size?: Nullable<number>;
   peer_percentile?: Nullable<number>;

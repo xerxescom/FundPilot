@@ -60,6 +60,7 @@
             <el-tag :type="marketTag(row.market_signal)">
               {{ marketText(row.market_signal) }} {{ percentileText(row.market_pe_percentile) }}
             </el-tag>
+            <small class="subtle-text">{{ marketFitText(row) }}</small>
           </template>
         </el-table-column>
         <el-table-column label="同类排名" min-width="140">
@@ -205,6 +206,11 @@ function marketTag(signal?: Score["market_signal"]) {
 
 function percentileText(value?: number | null) {
   return value === null || value === undefined ? "" : `PE ${Math.round(value * 100)}%`;
+}
+
+function marketFitText(row: Score) {
+  const labels = { high: "主题匹配高", medium: "主题匹配中", low: "主题匹配低" };
+  return row.market_fit_level ? labels[row.market_fit_level] : "";
 }
 
 function peerText(row: Score) {

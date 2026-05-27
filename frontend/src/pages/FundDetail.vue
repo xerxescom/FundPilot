@@ -69,7 +69,7 @@
             <div>
               <span>市场环境</span>
               <strong>{{ marketText(score?.market_signal) }} {{ percentileText(score?.market_pe_percentile) }}</strong>
-              <small>{{ score?.market_reason || '暂无' }}</small>
+              <small>{{ marketHint(score) }}</small>
             </div>
             <div>
               <span>组合适配</span>
@@ -435,7 +435,7 @@ function percentileText(value?: number | null) {
 
 function marketHint(row?: Score | null) {
   const percentile = percentileText(row?.market_pe_percentile);
-  return [percentile, row?.market_reason].filter(Boolean).join("；") || "暂无";
+  return [percentile, row?.market_reason, row?.market_fit_reason].filter(Boolean).join("；") || "暂无";
 }
 
 function peerText(row?: Score | null) {

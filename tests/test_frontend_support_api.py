@@ -193,6 +193,8 @@ def test_score_strategy_api_contract(db_session):
     assert "risk_flags" in rows[0]
     assert "risk_flag_labels" in rows[0]
     assert "market_pe_percentile" in rows[0]
+    assert "market_fit_level" in rows[0]
+    assert "market_fit_reason" in rows[0]
     assert "peer_group" in rows[0]
     assert "peer_metric_percentiles" in rows[0]
     assert "peer_reason" in rows[0]
