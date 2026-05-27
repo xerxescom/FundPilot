@@ -115,14 +115,18 @@
         </section>
       </div>
 
-      <div v-if="fundReport" class="section">
+      <div class="section">
         <div class="section-heading-row">
           <div>
             <div class="section-eyebrow">AI Analysis</div>
             <h2 class="section-title">基金诊断解释</h2>
           </div>
+          <el-button size="small" :loading="actionLoading === 'report'" :disabled="busy || !score" @click="generateReport">
+            生成基金解释
+          </el-button>
         </div>
-        <ReportCard :report="fundReport" />
+        <ReportCard v-if="fundReport" :report="fundReport" />
+        <el-empty v-else description="暂无基金诊断解释，请先生成基金解释" />
       </div>
 
       <el-alert
@@ -407,7 +411,7 @@ async function loadFund() {
     navPage.value = 1;
     indicator.value = await api.indicators(fundCode.value).catch(() => null);
     score.value = await api.score(fundCode.value).catch(() => null);
-    fundReport.value = await api.latestFundReport(fundCode.value).catch(() => null);
+    fundReport.value = await api.latestFundReport(fundCode.value);
     hasLoadedOnce.value = true;
   } finally {
     loading.value = false;

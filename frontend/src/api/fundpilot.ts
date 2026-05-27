@@ -68,7 +68,7 @@ export const api = {
   generateCorrelationAlerts: () => postJson<Alert[]>("/correlation/alerts"),
   generateDailyReport: () => postJson<Report>("/reports/daily"),
   generateFundReport: (code: string) => postJson<Report>(`/reports/fund/${code}`),
-  latestFundReport: (code: string) => getJson<Report>(`/reports/fund/${code}`),
+  latestFundReport: (code: string) => getJson<Report | null>(`/reports/fund/${code}`),
   latestReport: () => getJson<Report>("/reports/latest"),
   reportHistory: (limit = 50) => getJson<Report[]>("/reports/history", { limit }),
   ollamaStatus: () => getJson<unknown>("/reports/ollama/status"),

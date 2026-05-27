@@ -42,9 +42,6 @@ def generate_fund_report(fund_code: str, db: Session = Depends(get_db)):
     return report_service.generate_fund_explanation(db, fund_code)
 
 
-@router.get("/fund/{fund_code}", response_model=ReportOut)
+@router.get("/fund/{fund_code}", response_model=ReportOut | None)
 def latest_fund_report(fund_code: str, db: Session = Depends(get_db)):
-    report = report_service.latest_fund_report(db, fund_code)
-    if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
-    return report
+    return report_service.latest_fund_report(db, fund_code)

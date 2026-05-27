@@ -7,7 +7,7 @@ from app.api.v1.dashboard import dashboard_overview, dashboard_today
 from app.api.v1 import fund as fund_api
 from app.api.v1.fund import get_analysis_status, get_holding_stocks
 from app.api.v1.portfolio import portfolio_diagnosis, simulate_buy
-from app.api.v1.report import ollama_status
+from app.api.v1.report import latest_fund_report, ollama_status
 from app.api.v1.score import score_signal_summary, score_strategies, top_scores_by_strategy
 from app.api.v1.research import industry_overview, risk_return_points
 from app.db.models import AlertEvent, FundHoldingStock, FundIndicator, FundInfo, FundNav, FundScore, PortfolioPosition, Watchlist
@@ -88,6 +88,10 @@ def test_ollama_status_api_contract(monkeypatch):
     monkeypatch.setattr(OllamaClient, "check_model_available", fake_status)
 
     assert ollama_status()["model_available"] is True
+
+
+def test_latest_fund_report_empty_contract(db_session):
+    assert latest_fund_report("000001", db_session) is None
 
 
 def test_dashboard_today_api_contract(db_session):
