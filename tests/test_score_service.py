@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.db.models import (
+    FundHoldingIndustry,
     FundInfo,
     FundIndicator,
     FundNav,
@@ -289,6 +290,193 @@ def test_score_payload_uses_matched_index_pe_not_market_average(db_session):
     assert payload["valuation_index_code"] == "sh000905"
     assert payload["market_pe_percentile"] == 0.2
     assert payload["market_signal"] != "weak"
+
+
+def test_score_payload_uses_industry_valuation_index(db_session):
+    today = date.today()
+    db_session.add_all(
+        [
+            Watchlist(fund_code="000001", fund_name="测试医药基金", industry="医药", is_active=True),
+            FundInfo(
+                fund_code="000001",
+                fund_name="测试医药基金",
+                fund_type="股票指数",
+                establish_date=date(2020, 1, 1),
+                fund_size=Decimal("30"),
+                buy_status="开放申购",
+            ),
+            FundIndicator(
+                fund_code="000001",
+                calc_date=today,
+                return_1m=Decimal("0.02"),
+                return_3m=Decimal("0.05"),
+                return_6m=Decimal("0.12"),
+                return_1y=Decimal("0.25"),
+                max_drawdown_1y=Decimal("-0.05"),
+                volatility_1y=Decimal("0.10"),
+                sharpe_1y=Decimal("1.30"),
+                win_rate_1y=Decimal("0.60"),
+            ),
+            FundScore(fund_code="000001", score_date=today, total_score=Decimal("92"), rating="重点关注"),
+            FundNav(fund_code="000001", nav_date=date(2025, 1, 1), unit_nav=Decimal("1.0")),
+            FundNav(fund_code="000001", nav_date=today, unit_nav=Decimal("1.3")),
+            MarketIndexDaily(index_code="sh000300", index_name="沪深300", trade_date=today, close=Decimal("100")),
+            MarketIndexDaily(index_code="sh000933", index_name="中证医药", trade_date=today, close=Decimal("100")),
+            MarketValuationDaily(
+                index_code="sh000300",
+                index_name="沪深300",
+                trade_date=today,
+                pe_ttm=Decimal("18.50"),
+                pe_percentile=Decimal("0.20"),
+                source="test",
+            ),
+            MarketValuationDaily(
+                index_code="sh000933",
+                index_name="中证医药",
+                trade_date=today,
+                pe_ttm=Decimal("32.00"),
+                pe_percentile=Decimal("0.75"),
+                source="test",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    payload = score_payload(db_session, "000001")
+
+    assert payload["valuation_index_code"] == "sh000933"
+    assert payload["valuation_index_name"] == "中证医药"
+    assert payload["market_pe_percentile"] == 0.75
+    assert payload["industry_exposure"] == "医药"
+    assert payload["industry_exposure_source"] == "name_inference"
+
+
+def test_score_payload_explicit_tracking_index_keeps_priority_over_holding_industry(db_session):
+    today = date.today()
+    db_session.add_all(
+        [
+            FundInfo(
+                fund_code="000001",
+                fund_name="测试沪深300增强基金",
+                fund_type="股票指数",
+                establish_date=date(2020, 1, 1),
+                fund_size=Decimal("30"),
+                buy_status="开放申购",
+            ),
+            FundHoldingIndustry(
+                fund_code="000001",
+                report_date=today,
+                industry="消费",
+                weight=Decimal("0.42"),
+                source="test",
+            ),
+            FundIndicator(
+                fund_code="000001",
+                calc_date=today,
+                return_1m=Decimal("0.02"),
+                return_3m=Decimal("0.05"),
+                return_6m=Decimal("0.12"),
+                return_1y=Decimal("0.25"),
+                max_drawdown_1y=Decimal("-0.05"),
+                volatility_1y=Decimal("0.10"),
+                sharpe_1y=Decimal("1.30"),
+                win_rate_1y=Decimal("0.60"),
+            ),
+            FundScore(fund_code="000001", score_date=today, total_score=Decimal("92"), rating="重点关注"),
+            FundNav(fund_code="000001", nav_date=date(2025, 1, 1), unit_nav=Decimal("1.0")),
+            FundNav(fund_code="000001", nav_date=today, unit_nav=Decimal("1.3")),
+            MarketIndexDaily(index_code="sh000300", index_name="沪深300", trade_date=today, close=Decimal("100")),
+            MarketIndexDaily(index_code="sh000932", index_name="中证消费", trade_date=today, close=Decimal("100")),
+            MarketValuationDaily(
+                index_code="sh000300",
+                index_name="沪深300",
+                trade_date=today,
+                pe_ttm=Decimal("18.50"),
+                pe_percentile=Decimal("0.20"),
+                source="test",
+            ),
+            MarketValuationDaily(
+                index_code="sh000932",
+                index_name="中证消费",
+                trade_date=today,
+                pe_ttm=Decimal("28.00"),
+                pe_percentile=Decimal("0.65"),
+                source="test",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    payload = score_payload(db_session, "000001")
+
+    assert payload["tracking_index"] == "沪深300"
+    assert payload["valuation_index_code"] == "sh000300"
+    assert payload["industry_exposure_source"] == "tracking_index"
+
+
+def test_score_payload_holding_industry_replaces_weak_name_inference(db_session):
+    today = date.today()
+    db_session.add_all(
+        [
+            FundInfo(
+                fund_code="000001",
+                fund_name="测试成长混合基金",
+                fund_type="混合型",
+                establish_date=date(2020, 1, 1),
+                fund_size=Decimal("30"),
+                buy_status="开放申购",
+            ),
+            FundHoldingIndustry(
+                fund_code="000001",
+                report_date=today,
+                industry="消费",
+                weight=Decimal("0.42"),
+                source="test",
+            ),
+            FundIndicator(
+                fund_code="000001",
+                calc_date=today,
+                return_1m=Decimal("0.02"),
+                return_3m=Decimal("0.05"),
+                return_6m=Decimal("0.12"),
+                return_1y=Decimal("0.25"),
+                max_drawdown_1y=Decimal("-0.05"),
+                volatility_1y=Decimal("0.10"),
+                sharpe_1y=Decimal("1.30"),
+                win_rate_1y=Decimal("0.60"),
+            ),
+            FundScore(fund_code="000001", score_date=today, total_score=Decimal("92"), rating="重点关注"),
+            FundNav(fund_code="000001", nav_date=date(2025, 1, 1), unit_nav=Decimal("1.0")),
+            FundNav(fund_code="000001", nav_date=today, unit_nav=Decimal("1.3")),
+            MarketIndexDaily(index_code="sh000300", index_name="沪深300", trade_date=today, close=Decimal("100")),
+            MarketIndexDaily(index_code="sh000932", index_name="中证消费", trade_date=today, close=Decimal("100")),
+            MarketValuationDaily(
+                index_code="sh000300",
+                index_name="沪深300",
+                trade_date=today,
+                pe_ttm=Decimal("18.50"),
+                pe_percentile=Decimal("0.20"),
+                source="test",
+            ),
+            MarketValuationDaily(
+                index_code="sh000932",
+                index_name="中证消费",
+                trade_date=today,
+                pe_ttm=Decimal("28.00"),
+                pe_percentile=Decimal("0.65"),
+                source="test",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    payload = score_payload(db_session, "000001")
+
+    assert payload["valuation_index_code"] == "sh000932"
+    assert payload["valuation_index_name"] == "中证消费"
+    assert payload["market_pe_percentile"] == 0.65
+    assert payload["industry_exposure"] == "消费"
+    assert payload["industry_exposure_source"] == "holding"
 
 
 def test_score_payload_equity_theme_uses_market_fit_gate(db_session):

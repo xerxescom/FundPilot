@@ -286,7 +286,7 @@ def _fund_profile_context(db: Session, fund: FundInfo | None, watchlist: Watchli
             top = holdings[0]
             profile["industry_exposure_source"] = "holding"
             profile["industry_exposure"] = top.industry
-            if not profile.get("valuation_index_code") and top.industry in fund_profile_service.INDUSTRY_VALUATION_FALLBACK:
+            if top.industry in fund_profile_service.INDUSTRY_VALUATION_FALLBACK:
                 code, name = fund_profile_service.INDUSTRY_VALUATION_FALLBACK[top.industry]
                 profile["valuation_index_code"] = code
                 profile["valuation_index_name"] = name
