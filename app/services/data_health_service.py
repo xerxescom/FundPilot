@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -22,23 +22,37 @@ def _latest_indicator_date(db: Session, fund_code: str) -> date | None:
     )
 
 
-def _latest_score_date(db: Session, fund_code: str) -> date | None:
-    return db.scalar(
-        select(FundScore.score_date)
+def _latest_score_info(db: Session, fund_code: str) -> tuple[date | None, datetime | None]:
+    row = db.execute(
+        select(FundScore.score_date, FundScore.created_at)
         .where(FundScore.fund_code == fund_code)
-        .order_by(FundScore.score_date.desc())
+        .order_by(FundScore.score_date.desc(), FundScore.created_at.desc())
         .limit(1)
-    )
+    ).first()
+    return (row.score_date, row.created_at) if row else (None, None)
 
 
-def _latest_fund_report_date(db: Session, fund_code: str) -> date | None:
-    created_at = db.scalar(
+def _latest_fund_report_created_at(db: Session, fund_code: str) -> datetime | None:
+    return db.scalar(
         select(AIReport.created_at)
-        .where(AIReport.report_type == "fund", AIReport.target_code == fund_code)
+        .where(AIReport.report_type == "fund", AIReport.target_code == fund_code.zfill(6))
         .order_by(AIReport.created_at.desc())
         .limit(1)
     )
-    return created_at.date() if created_at else None
+
+
+def _needs_fund_report(
+    latest_score_date: date | None,
+    latest_score_created_at: datetime | None,
+    latest_report_created_at: datetime | None,
+) -> bool:
+    if not latest_score_date:
+        return False
+    if not latest_report_created_at:
+        return True
+    if latest_score_created_at and latest_report_created_at >= latest_score_created_at:
+        return False
+    return latest_report_created_at.date() < latest_score_date
 
 
 def _nav_dates(db: Session, fund_code: str) -> list[date]:
@@ -95,8 +109,9 @@ def fund_data_health(db: Session, fund_code: str, today: date | None = None) -> 
     ).all()
     gap_count = sum(1 for left, right in zip(dates, dates[1:]) if (right - left).days > NAV_GAP_DAYS)
     latest_indicator_date = _latest_indicator_date(db, fund_code)
-    latest_score_date = _latest_score_date(db, fund_code)
-    latest_report_date = _latest_fund_report_date(db, fund_code)
+    latest_score_date, latest_score_created_at = _latest_score_info(db, fund_code)
+    latest_report_created_at = _latest_fund_report_created_at(db, fund_code)
+    latest_report_date = latest_report_created_at.date() if latest_report_created_at else None
     latest_sync_status, latest_failure_reason, latest_sync_date = _latest_sync_status(db, fund_code)
     is_stale = latest_nav_date is None or (today - latest_nav_date).days > STALE_NAV_DAYS
     stale_days = (today - latest_nav_date).days if latest_nav_date else None
@@ -104,7 +119,7 @@ def fund_data_health(db: Session, fund_code: str, today: date | None = None) -> 
     needs_score = bool(
         latest_indicator_date and (latest_score_date is None or latest_score_date < latest_indicator_date)
     )
-    needs_report = bool(latest_score_date and (latest_report_date is None or latest_report_date < latest_score_date))
+    needs_report = _needs_fund_report(latest_score_date, latest_score_created_at, latest_report_created_at)
     status = "正常"
     issues = []
     if not dates:
