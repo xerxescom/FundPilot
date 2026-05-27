@@ -6,6 +6,7 @@
       <el-button :loading="actionLoading === 'sync'" :disabled="busy" @click="syncNav">同步净值</el-button>
       <el-button :loading="actionLoading === 'indicator'" :disabled="busy" @click="calcIndicators">计算指标</el-button>
       <el-button :loading="actionLoading === 'score'" :disabled="busy" @click="calcScore">计算评分</el-button>
+      <el-button :loading="actionLoading === 'holdings'" :disabled="busy" @click="syncHoldings">同步持仓</el-button>
       <el-button type="primary" :loading="actionLoading === 'analyze'" :disabled="busy" @click="analyze">
         一键同步并分析
       </el-button>
@@ -216,6 +217,26 @@
         <div class="section table-section">
           <div class="section-heading-row">
             <div>
+              <div class="section-eyebrow">Holdings</div>
+              <h2 class="section-title">前十大股票持仓</h2>
+            </div>
+            <el-tag type="info" effect="plain">{{ holdingsDateText }}</el-tag>
+          </div>
+          <el-empty v-if="!holdingStocks.length" description="暂无股票持仓明细" />
+          <el-table v-else :data="holdingStocks" border stripe>
+            <el-table-column prop="stock_code" label="股票代码" width="120" />
+            <el-table-column prop="stock_name" label="股票名称" min-width="160" />
+            <el-table-column label="持仓占比" width="120">
+              <template #default="{ row }">{{ pct(row.weight) }}</template>
+            </el-table-column>
+            <el-table-column prop="report_date" label="报告期" width="130" />
+            <el-table-column prop="source" label="来源" width="110" />
+          </el-table>
+        </div>
+
+        <div class="section table-section">
+          <div class="section-heading-row">
+            <div>
               <div class="section-eyebrow">NAV Detail</div>
               <h2 class="section-title">净值明细</h2>
             </div>
@@ -261,7 +282,7 @@ import { useRoute } from "vue-router";
 
 import { api } from "../api/fundpilot";
 import { dateText, pct, scoreText } from "../api/format";
-import type { AnalysisStatus, FundNav, Indicator, Report, Score, SyncDiagnostics, WatchlistItem } from "../api/types";
+import type { AnalysisStatus, FundHoldingStock, FundNav, Indicator, Report, Score, SyncDiagnostics, WatchlistItem } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import ChartSkeleton from "../components/ChartSkeleton.vue";
 import FundSelector from "../components/FundSelector.vue";
@@ -269,7 +290,7 @@ import MetricCard from "../components/MetricCard.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
 import ReportCard from "../components/ReportCard.vue";
 
-type ActionLoading = "sync" | "indicator" | "score" | "analyze" | "report" | null;
+type ActionLoading = "sync" | "indicator" | "score" | "holdings" | "analyze" | "report" | null;
 
 const route = useRoute();
 const watchlist = ref<WatchlistItem[]>([]);
@@ -279,6 +300,7 @@ const loading = ref(false);
 const hasLoadedOnce = ref(false);
 const actionLoading = ref<ActionLoading>(null);
 const navRows = ref<FundNav[]>([]);
+const holdingStocks = ref<FundHoldingStock[]>([]);
 const navPage = ref(1);
 const navPageSize = ref(20);
 const navSort = ref<{ prop: keyof FundNav; order: "ascending" | "descending" }>({
@@ -290,7 +312,8 @@ const score = ref<Score | null>(null);
 const status = ref<AnalysisStatus | null>(null);
 const syncDiagnostics = ref<SyncDiagnostics | null>(null);
 const fundReport = ref<Report | null>(null);
-const fundCode = computed(() => (manualCode.value || selected.value || String(route.params.fundCode || "")).trim());
+const routeFundCode = computed(() => String(route.params.fundCode || "").trim());
+const fundCode = computed(() => (manualCode.value || selected.value || routeFundCode.value).trim());
 const needsFullAnalysis = computed(() => !navRows.value.length || !indicator.value || !score.value);
 const busy = computed(() => actionLoading.value !== null);
 const activeStep = computed(() => status.value?.steps.filter((step) => step.done).length || 0);
@@ -311,8 +334,10 @@ const loadingText = computed(() => {
   if (actionLoading.value === "sync") return "正在同步净值数据...";
   if (actionLoading.value === "indicator") return "正在计算指标...";
   if (actionLoading.value === "score") return "正在计算评分...";
+  if (actionLoading.value === "holdings") return "正在同步股票持仓...";
   return "正在加载基金详情...";
 });
+const holdingsDateText = computed(() => holdingStocks.value[0]?.report_date || "暂无报告期");
 
 const drawdown = computed(() => {
   let peak = 0;
@@ -369,7 +394,7 @@ const navOption = computed<EChartsOption>(() => ({
 
 async function loadBase() {
   watchlist.value = await api.watchlist();
-  selected.value ||= watchlist.value[0]?.fund_code;
+  selected.value = routeFundCode.value || selected.value || watchlist.value[0]?.fund_code;
 }
 
 async function loadFund() {
@@ -378,6 +403,7 @@ async function loadFund() {
   try {
     status.value = (await api.analysisStatus(fundCode.value).catch(() => null)) as AnalysisStatus | null;
     navRows.value = await api.nav(fundCode.value);
+    holdingStocks.value = await api.holdingStocks(fundCode.value).catch(() => []);
     navPage.value = 1;
     indicator.value = await api.indicators(fundCode.value).catch(() => null);
     score.value = await api.score(fundCode.value).catch(() => null);
@@ -525,6 +551,15 @@ async function calcScore() {
   });
 }
 
+async function syncHoldings() {
+  if (!fundCode.value) return;
+  await runAction("holdings", async () => {
+    const result = await api.syncHoldingStocks(fundCode.value);
+    ElMessage.success(`股票持仓已同步 ${result.synced_rows} 条`);
+    await loadFund();
+  });
+}
+
 async function analyze() {
   if (!fundCode.value) return;
   await runAction("analyze", async () => {
@@ -548,6 +583,12 @@ onMounted(async () => {
   await loadFund();
 });
 watch(fundCode, loadFund);
+watch(routeFundCode, (code) => {
+  if (code) {
+    manualCode.value = "";
+    selected.value = code;
+  }
+});
 </script>
 
 <style scoped>
