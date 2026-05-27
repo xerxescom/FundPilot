@@ -6,12 +6,13 @@ from app.api.v1.correlation import correlation_matrix, fund_return_series
 from app.api.v1.dashboard import dashboard_overview, dashboard_today
 from app.api.v1 import fund as fund_api
 from app.api.v1.fund import get_analysis_status
-from app.api.v1.portfolio import portfolio_diagnosis
+from app.api.v1.portfolio import portfolio_diagnosis, simulate_buy
 from app.api.v1.report import ollama_status
 from app.api.v1.score import score_signal_summary, score_strategies, top_scores_by_strategy
 from app.api.v1.research import industry_overview, risk_return_points
-from app.db.models import AlertEvent, FundIndicator, FundNav, FundScore, PortfolioPosition, Watchlist
+from app.db.models import AlertEvent, FundIndicator, FundInfo, FundNav, FundScore, PortfolioPosition, Watchlist
 from app.schemas.alert import AlertUpdate
+from app.schemas.portfolio import PortfolioBuySimulationIn
 from app.services.ai.ollama_client import OllamaClient
 
 
@@ -156,6 +157,18 @@ def test_portfolio_diagnosis_api_contract(db_session):
 
     assert payload["summary"]["position_count"] == 1
     assert payload["risk_items"]
+    assert "不构成买入或卖出建议" in payload["observation"]
+
+
+def test_portfolio_buy_simulation_api_contract(db_session):
+    db_session.add(FundInfo(fund_code="000001", fund_name="目标基金", fund_type="指数", source="test"))
+    db_session.commit()
+
+    payload = simulate_buy(PortfolioBuySimulationIn(fund_code="000001", amount=Decimal("1000")), db_session)
+
+    assert payload["fund_code"] == "000001"
+    assert "target_weight_after" in payload
+    assert "high_correlation_positions" in payload
     assert "不构成买入或卖出建议" in payload["observation"]
 
 

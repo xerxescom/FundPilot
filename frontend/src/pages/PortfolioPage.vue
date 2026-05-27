@@ -20,6 +20,44 @@
     </div>
 
     <div class="section panel">
+      <h2 class="section-title">拟买入模拟</h2>
+      <el-form :model="simulationForm" inline>
+        <el-form-item label="基金代码"><el-input v-model="simulationForm.fund_code" /></el-form-item>
+        <el-form-item label="拟买金额"><el-input-number v-model="simulationForm.amount" :min="0" /></el-form-item>
+        <el-form-item>
+          <el-button type="primary" :disabled="!simulationForm.fund_code || simulationForm.amount <= 0" @click="simulateBuy">
+            计算组合影响
+          </el-button>
+        </el-form-item>
+      </el-form>
+      <template v-if="simulation">
+        <div class="metric-grid simulation-grid">
+          <MetricCard label="买入后总市值" :value="money(simulation.total_value_after)" :hint="`买入前 ${money(simulation.total_value_before)}`" />
+          <MetricCard label="目标基金占比" :value="pct(simulation.target_weight_after)" :hint="`买入前 ${pct(simulation.target_weight_before)}`" />
+          <MetricCard label="最大持仓占比" :value="pct(simulation.max_weight_after)" :hint="`买入前 ${pct(simulation.max_weight_before)}`" />
+          <MetricCard label="最高相关性" :value="correlationText(simulation.max_correlation)" :hint="`平均 ${correlationText(simulation.avg_correlation)}`" />
+        </div>
+        <el-alert
+          v-for="risk in simulation.risk_items"
+          :key="risk.title"
+          class="alert-item"
+          :type="risk.level === 'medium' ? 'warning' : 'info'"
+          :closable="false"
+          :title="risk.title"
+          :description="risk.description"
+        />
+        <el-table v-if="simulation.high_correlation_positions.length" class="section" :data="simulation.high_correlation_positions" border stripe>
+          <el-table-column prop="fund_code" label="高相关基金代码" width="140" />
+          <el-table-column prop="fund_name" label="基金名称" min-width="180" />
+          <el-table-column label="相关性" width="120">
+            <template #default="{ row }">{{ correlationText(row.correlation) }}</template>
+          </el-table-column>
+        </el-table>
+        <p class="muted">{{ simulation.observation }}</p>
+      </template>
+    </div>
+
+    <div class="section panel">
       <h2 class="section-title">组合诊断</h2>
       <div class="metric-grid">
         <MetricCard label="持仓数量" :value="diagnosis?.summary.position_count ?? 0" />
@@ -90,16 +128,18 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "../api/fundpilot";
 import { money, pct } from "../api/format";
-import type { PortfolioDiagnosis, PortfolioOverview, WatchlistItem } from "../api/types";
+import type { PortfolioBuySimulation, PortfolioDiagnosis, PortfolioOverview, WatchlistItem } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import MetricCard from "../components/MetricCard.vue";
 
 const loading = ref(false);
 const overview = ref<PortfolioOverview | null>(null);
 const diagnosis = ref<PortfolioDiagnosis | null>(null);
+const simulation = ref<PortfolioBuySimulation | null>(null);
 const transactions = ref<unknown[]>([]);
 const watchlist = ref<WatchlistItem[]>([]);
 const transaction = reactive({ fund_code: "", trade_date: "", amount: 0, nav: 0, fee: 0 });
+const simulationForm = reactive({ fund_code: "", amount: 0 });
 
 /** {code: name} map built from watchlist for transaction rows */
 const nameMap = computed(() =>
@@ -165,6 +205,19 @@ async function addTransaction() {
   }
 }
 
+async function simulateBuy() {
+  loading.value = true;
+  try {
+    simulation.value = await api.simulatePortfolioBuy({ ...simulationForm });
+  } finally {
+    loading.value = false;
+  }
+}
+
+function correlationText(value?: number | null) {
+  return value === null || value === undefined ? "暂无" : Number(value).toFixed(2);
+}
+
 async function deleteTransaction(id: number) {
   await api.deleteTransaction(id);
   await load();
@@ -180,6 +233,10 @@ onMounted(load);
 
 <style scoped>
 .alert-item {
+  margin-top: 10px;
+}
+
+.simulation-grid {
   margin-top: 10px;
 }
 </style>

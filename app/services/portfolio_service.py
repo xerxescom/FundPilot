@@ -270,3 +270,136 @@ def portfolio_diagnosis(db: Session) -> dict:
         "risk_items": risk_items,
         "observation": "组合诊断仅用于风险观察和复盘，不构成买入或卖出建议。",
     }
+
+
+def _portfolio_value_by_fund(db: Session) -> dict[str, Decimal]:
+    values: dict[str, Decimal] = {}
+    for summary in [position_summary(db, item) for item in list_positions(db)]:
+        position = summary["position"]
+        current_value = summary["current_value"]
+        if current_value is not None:
+            values[position.fund_code] = values.get(position.fund_code, Decimal("0")) + Decimal(current_value)
+    return values
+
+
+def _fund_name_map(db: Session, codes: list[str]) -> dict[str, str]:
+    if not codes:
+        return {}
+    infos = db.scalars(select(FundInfo).where(FundInfo.fund_code.in_(codes))).all()
+    return {item.fund_code: item.fund_name for item in infos}
+
+
+def simulate_buy(db: Session, fund_code: str, amount: Decimal) -> dict:
+    fund_code = fund_code.zfill(6)
+    amount = Decimal(amount)
+    if amount <= 0:
+        raise ValueError("amount must be positive")
+
+    before_values = _portfolio_value_by_fund(db)
+    total_before = sum(before_values.values(), Decimal("0"))
+    after_values = dict(before_values)
+    after_values[fund_code] = after_values.get(fund_code, Decimal("0")) + amount
+    total_after = total_before + amount
+
+    max_weight_before = max((value / total_before for value in before_values.values()), default=None) if total_before else None
+    max_weight_after = max((value / total_after for value in after_values.values()), default=None) if total_after else None
+    target_weight_before = before_values.get(fund_code, Decimal("0")) / total_before if total_before else Decimal("0")
+    target_weight_after = after_values.get(fund_code, Decimal("0")) / total_after if total_after else Decimal("1")
+
+    current_codes = sorted(before_values)
+    high_corr_threshold = Decimal("0.85")
+    corr_pairs = []
+    avg_correlation = None
+    max_correlation = None
+    corr_codes = sorted(set(current_codes + [fund_code]))
+    nav_rows = db.scalars(
+        select(FundNav)
+        .where(FundNav.fund_code.in_(corr_codes), FundNav.daily_return.is_not(None))
+        .order_by(FundNav.nav_date.asc())
+    ).all()
+    corr = pd.DataFrame(
+        [
+            {"nav_date": row.nav_date, "fund_code": row.fund_code, "daily_return": float(row.daily_return)}
+            for row in nav_rows
+        ]
+    )
+    corr = (
+        corr.pivot_table(index="nav_date", columns="fund_code", values="daily_return").corr(min_periods=5)
+        if not corr.empty
+        else pd.DataFrame()
+    )
+    if not corr.empty and fund_code in corr.columns and current_codes:
+        name_map = _fund_name_map(db, current_codes + [fund_code])
+        correlations = []
+        for code in current_codes:
+            if code == fund_code or code not in corr.columns:
+                continue
+            value = corr.loc[fund_code, code]
+            if pd.notna(value):
+                corr_value = Decimal(str(float(value))).quantize(Decimal("0.0001"))
+                correlations.append(corr_value)
+                if corr_value >= high_corr_threshold:
+                    corr_pairs.append(
+                        {
+                            "fund_code": code,
+                            "fund_name": name_map.get(code, code),
+                            "correlation": corr_value,
+                        }
+                    )
+        if correlations:
+            max_correlation = max(correlations)
+            avg_correlation = (sum(correlations, Decimal("0")) / Decimal(len(correlations))).quantize(Decimal("0.0001"))
+
+    risk_items = []
+    if max_weight_after is not None and max_weight_after >= Decimal("0.30"):
+        risk_items.append(
+            {
+                "level": "medium",
+                "title": "买入后持仓集中度偏高",
+                "description": f"买入后单只基金最大占比约 {max_weight_after:.2%}，需要关注组合对单一基金波动的敏感度。",
+            }
+        )
+    if target_weight_after >= Decimal("0.30"):
+        risk_items.append(
+            {
+                "level": "medium",
+                "title": "目标基金占比偏高",
+                "description": f"拟买入后该基金占组合约 {target_weight_after:.2%}，可能放大单一标的影响。",
+            }
+        )
+    if max_correlation is not None and max_correlation >= high_corr_threshold:
+        risk_items.append(
+            {
+                "level": "medium",
+                "title": "与现有持仓相关性偏高",
+                "description": f"该基金与现有持仓最高相关性约 {max_correlation:.2f}，可能带来重复配置。",
+            }
+        )
+    if not risk_items:
+        risk_items.append(
+            {
+                "level": "info",
+                "title": "未触发明显新增风险",
+                "description": "按当前净值和相关性样本估算，拟买入未显著放大集中度或高相关风险。",
+            }
+        )
+
+    name_map = _fund_name_map(db, [fund_code])
+    return {
+        "fund_code": fund_code,
+        "fund_name": name_map.get(fund_code),
+        "amount": amount,
+        "total_value_before": total_before,
+        "total_value_after": total_after,
+        "target_weight_before": target_weight_before,
+        "target_weight_after": target_weight_after,
+        "max_weight_before": max_weight_before,
+        "max_weight_after": max_weight_after,
+        "position_count_before": len(before_values),
+        "position_count_after": len(after_values),
+        "max_correlation": max_correlation,
+        "avg_correlation": avg_correlation,
+        "high_correlation_positions": corr_pairs,
+        "risk_items": risk_items,
+        "observation": "买入模拟仅用于观察集中度和相关性变化，不构成买入或卖出建议。",
+    }

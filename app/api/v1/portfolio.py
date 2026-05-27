@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.portfolio import (
     PortfolioCreate,
+    PortfolioBuySimulationIn,
     PortfolioOut,
     PortfolioOverview,
     PortfolioSummary,
@@ -59,6 +60,14 @@ def portfolio_overview(db: Session = Depends(get_db)):
 @router.get("/diagnosis")
 def portfolio_diagnosis(db: Session = Depends(get_db)):
     return portfolio_service.portfolio_diagnosis(db)
+
+
+@router.post("/simulate-buy")
+def simulate_buy(payload: PortfolioBuySimulationIn, db: Session = Depends(get_db)):
+    try:
+        return portfolio_service.simulate_buy(db, payload.fund_code, payload.amount)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/correlation")

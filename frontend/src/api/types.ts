@@ -192,6 +192,29 @@ export interface PortfolioDiagnosis {
   observation: string;
 }
 
+export interface PortfolioBuySimulation {
+  fund_code: string;
+  fund_name?: Nullable<string>;
+  amount: number;
+  total_value_before: number;
+  total_value_after: number;
+  target_weight_before: number;
+  target_weight_after: number;
+  max_weight_before?: Nullable<number>;
+  max_weight_after?: Nullable<number>;
+  position_count_before: number;
+  position_count_after: number;
+  max_correlation?: Nullable<number>;
+  avg_correlation?: Nullable<number>;
+  high_correlation_positions: Array<{
+    fund_code: string;
+    fund_name?: Nullable<string>;
+    correlation: number;
+  }>;
+  risk_items: RiskItem[];
+  observation: string;
+}
+
 export interface Report {
   id: number;
   report_type: string;

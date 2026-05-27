@@ -23,6 +23,11 @@ class PortfolioTransactionCreate(BaseModel):
     note: str | None = None
 
 
+class PortfolioBuySimulationIn(BaseModel):
+    fund_code: str
+    amount: Decimal
+
+
 class PortfolioUpdate(BaseModel):
     holding_amount: Decimal | None = None
     holding_share: Decimal | None = None

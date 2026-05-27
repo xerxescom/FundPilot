@@ -6,6 +6,7 @@ import type {
   FundNav,
   Indicator,
   MarketContext,
+  PortfolioBuySimulation,
   PortfolioOverview,
   Report,
   Score,
@@ -46,6 +47,8 @@ export const api = {
   updateAlert: (id: number, status: string) => patchJson<Alert>(`/alerts/${id}`, { status }),
   portfolioOverview: () => getJson<PortfolioOverview>("/portfolio/overview"),
   portfolioDiagnosis: () => getJson<unknown>("/portfolio/diagnosis"),
+  simulatePortfolioBuy: (data: { fund_code: string; amount: number }) =>
+    postJson<PortfolioBuySimulation>("/portfolio/simulate-buy", data),
   portfolioTransactions: () => getJson<unknown[]>("/portfolio/transactions"),
   addTransaction: (data: Record<string, unknown>) => postJson<unknown>("/portfolio/transactions", data),
   deleteTransaction: (id: number) => deleteJson(`/portfolio/transactions/${id}`),
