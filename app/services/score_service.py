@@ -60,6 +60,18 @@ SCORE_STRATEGIES = {
             "trade_status_score": 1.0,
         },
     },
+    "peer_relative": {
+        "name": "同类相对型",
+        "scenario": "按同组基金的收益、回撤、波动和 Sharpe 百分位折算 100 分，适合观察基金在同类中的相对竞争力。",
+        "weights": {
+            "return_score": 1.0,
+            "drawdown_score": 1.0,
+            "volatility_score": 1.0,
+            "stability_score": 1.0,
+            "size_score": 1.0,
+            "trade_status_score": 1.0,
+        },
+    },
 }
 
 RISK_FLAG_LABELS = {
@@ -378,6 +390,22 @@ def _peer_source_rows(db: Session) -> list:
     ).all()
 
 
+def _peer_metric_percentiles(indicator: FundIndicator, peers: list[FundIndicator]) -> dict[str, float]:
+    metric_config = {
+        "return_1y": True,
+        "max_drawdown_1y": True,
+        "volatility_1y": False,
+        "sharpe_1y": True,
+    }
+    percentiles: dict[str, float] = {}
+    for field, higher_is_better in metric_config.items():
+        values = [item for item in [_value(getattr(peer, field)) for peer in peers] if item is not None]
+        value = _value(getattr(indicator, field))
+        if value is not None and values:
+            percentiles[field] = round(_percentile_rank(values, value, higher_is_better), 4)
+    return percentiles
+
+
 def _peer_comparison(
     db: Session,
     fund_code: str,
@@ -399,6 +427,7 @@ def _peer_comparison(
             "peer_group_size": 0,
             "peer_percentile": None,
             "peer_reason": "缺少最新指标，无法进行同类比较",
+            "peer_metric_percentiles": {},
             "peer_risk_flags": ["peer_indicator_missing"],
         }
 
@@ -415,24 +444,19 @@ def _peer_comparison(
             "peer_group_size": peer_count,
             "peer_percentile": None,
             "peer_reason": "同类样本不足3只，暂不使用同类排名影响窗口信号",
+            "peer_metric_percentiles": {},
             "peer_risk_flags": [],
         }
 
-    metrics: list[float] = []
-    for values, value, higher_is_better in [
-        ([item for item in [_value(peer.return_1y) for peer in peers] if item is not None], _value(indicator.return_1y), True),
-        ([item for item in [_value(peer.max_drawdown_1y) for peer in peers] if item is not None], _value(indicator.max_drawdown_1y), True),
-        ([item for item in [_value(peer.volatility_1y) for peer in peers] if item is not None], _value(indicator.volatility_1y), False),
-        ([item for item in [_value(peer.sharpe_1y) for peer in peers] if item is not None], _value(indicator.sharpe_1y), True),
-    ]:
-        if value is not None and values:
-            metrics.append(_percentile_rank(values, value, higher_is_better))
+    metric_percentiles = _peer_metric_percentiles(indicator, peers)
+    metrics = list(metric_percentiles.values())
     if not metrics:
         return {
             "peer_group": peer_group,
             "peer_group_size": peer_count,
             "peer_percentile": None,
             "peer_reason": "同类基金关键指标不足，暂不使用同类排名影响窗口信号",
+            "peer_metric_percentiles": {},
             "peer_risk_flags": ["peer_metric_missing"],
         }
 
@@ -451,7 +475,57 @@ def _peer_comparison(
         "peer_group_size": peer_count,
         "peer_percentile": percentile,
         "peer_reason": reason,
+        "peer_metric_percentiles": metric_percentiles,
         "peer_risk_flags": flags,
+    }
+
+
+def _apply_peer_relative_strategy(
+    base: dict,
+    indicator: FundIndicator,
+    fund: FundInfo | None,
+    peer: dict,
+) -> dict:
+    strategy = SCORE_STRATEGIES["peer_relative"]
+    metric_percentiles = peer.get("peer_metric_percentiles") or {}
+    weights = {
+        "return_1y": 0.35,
+        "max_drawdown_1y": 0.25,
+        "volatility_1y": 0.20,
+        "sharpe_1y": 0.20,
+    }
+    available = {key: metric_percentiles[key] for key in weights if key in metric_percentiles}
+    if not available:
+        return {
+            **base,
+            "strategy": "peer_relative",
+            "strategy_name": strategy["name"],
+            "strategy_scenario": strategy["scenario"],
+            "reason": f"{strategy['name']}：同类样本或关键指标不足，暂沿用基础评分。{base['reason']}",
+        }
+
+    weight_sum = sum(weights[key] for key in available)
+    total_score = round(sum(available[key] * weights[key] for key in available) / weight_sum * 100, 2)
+    buy_window_signal, buy_window_reason = _buy_window_signal(
+        total_score,
+        int(base["confidence_score"]),
+        list(base["risk_flags"]),
+        fund,
+        _value(indicator.return_1m),
+        _value(indicator.return_3m),
+        _value(indicator.max_drawdown_1y),
+        _value(indicator.volatility_1y),
+    )
+    return {
+        **base,
+        "strategy": "peer_relative",
+        "strategy_name": strategy["name"],
+        "strategy_scenario": strategy["scenario"],
+        "total_score": total_score,
+        "rating": _rating(total_score),
+        "buy_window_signal": buy_window_signal,
+        "buy_window_reason": buy_window_reason,
+        "reason": f"{strategy['name']}：按同类收益、回撤、波动和 Sharpe 百分位折算；{base['reason']}",
     }
 
 
@@ -490,6 +564,7 @@ def _apply_context(payload: dict, market: dict, portfolio: dict, peer: dict) -> 
             "peer_group_size": peer["peer_group_size"],
             "peer_percentile": peer["peer_percentile"],
             "peer_reason": peer["peer_reason"],
+            "peer_metric_percentiles": peer.get("peer_metric_percentiles") or {},
             "portfolio_fit_score": portfolio["portfolio_fit_score"],
             "portfolio_fit_level": portfolio["portfolio_fit_level"],
             "portfolio_fit_reason": portfolio["portfolio_fit_reason"],
@@ -913,6 +988,28 @@ def top_scores_by_strategy(db: Session, strategy: str = "default", limit: int = 
         )
         .outerjoin(FundInfo, FundInfo.fund_code == FundIndicator.fund_code)
     ).all()
+
+    if strategy == "peer_relative":
+        scored = []
+        for indicator, fund in rows:
+            peer = _peer_comparison(db, indicator.fund_code, indicator, fund, peer_rows)
+            base = score_indicator(indicator, fund, _nav_stats(db, indicator.fund_code))
+            item = _apply_peer_relative_strategy(base, indicator, fund, peer)
+            item = _apply_context(
+                item,
+                market,
+                _portfolio_fit(db, indicator.fund_code, portfolio_overview, high_correlation_pairs),
+                peer,
+            )
+            scored.append(
+                {
+                    "fund_code": indicator.fund_code,
+                    "fund_name": fund.fund_name if fund else None,
+                    "score_date": indicator.calc_date,
+                    **item,
+                }
+            )
+        return sorted(scored, key=lambda item: item["total_score"] or 0, reverse=True)[:limit]
 
     scored = []
     for indicator, fund in rows:

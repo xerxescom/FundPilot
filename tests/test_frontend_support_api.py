@@ -70,7 +70,7 @@ def test_correlation_support_api_contracts(db_session):
     matrix = correlation_matrix(db_session)
     returns = fund_return_series("000001", "000002", db=db_session)
 
-    assert "000001" in matrix
+    assert "000001" in matrix["matrix"]
     assert len(returns) == 2
 
 
@@ -101,7 +101,7 @@ def test_dashboard_today_api_contract(db_session):
     assert payload["watchlist_count"] == 1
     assert payload["todos"]
     assert any(item["key"] == "score" for item in payload["todos"])
-    assert payload["unread_alerts"][0].title == "回撤提醒"
+    assert payload["unread_alerts"][0]["title"] == "回撤提醒"
     assert "portfolio_diagnosis" in payload
     assert "score_summary" in payload
     assert "pe_percentile" in payload["market_context"][0]
@@ -194,6 +194,7 @@ def test_score_strategy_api_contract(db_session):
     assert "risk_flag_labels" in rows[0]
     assert "market_pe_percentile" in rows[0]
     assert "peer_group" in rows[0]
+    assert "peer_metric_percentiles" in rows[0]
     assert "peer_reason" in rows[0]
 
 

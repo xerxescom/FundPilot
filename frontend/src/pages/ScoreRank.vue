@@ -64,7 +64,8 @@
         </el-table-column>
         <el-table-column label="同类排名" min-width="140">
           <template #default="{ row }">
-            {{ peerText(row) }}
+            <div>{{ peerText(row) }}</div>
+            <small class="subtle-text">{{ peerMetricText(row) }}</small>
           </template>
         </el-table-column>
         <el-table-column label="组合适配" min-width="130">
@@ -213,6 +214,20 @@ function peerText(row: Score) {
   return `${Math.round(row.peer_percentile * 100)}% / ${row.peer_group_size || 0}`;
 }
 
+function peerMetricText(row: Score) {
+  const metrics = row.peer_metric_percentiles || {};
+  const labels: Record<string, string> = {
+    return_1y: "收益",
+    max_drawdown_1y: "回撤",
+    volatility_1y: "波动",
+    sharpe_1y: "Sharpe",
+  };
+  return Object.entries(labels)
+    .filter(([key]) => metrics[key] !== undefined)
+    .map(([key, label]) => `${label}${Math.round(metrics[key] * 100)}%`)
+    .join(" · ");
+}
+
 function fitText(level?: Score["portfolio_fit_level"]) {
   const labels = { high: "高", medium: "中", low: "低" };
   return level ? labels[level] : "暂无";
@@ -242,3 +257,13 @@ onMounted(async () => {
   await loadScores();
 });
 </script>
+
+<style scoped>
+.subtle-text {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+</style>

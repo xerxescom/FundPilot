@@ -31,6 +31,7 @@ class ScoreOut(BaseModel):
     peer_group_size: int | None = None
     peer_percentile: Decimal | None = None
     peer_reason: str | None = None
+    peer_metric_percentiles: dict[str, Decimal] = Field(default_factory=dict)
     portfolio_fit_score: Decimal | None = None
     portfolio_fit_level: str | None = None
     portfolio_fit_reason: str | None = None

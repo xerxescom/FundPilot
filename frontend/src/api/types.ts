@@ -37,6 +37,7 @@ export interface Score {
   peer_group_size?: Nullable<number>;
   peer_percentile?: Nullable<number>;
   peer_reason?: Nullable<string>;
+  peer_metric_percentiles?: Record<string, number>;
   portfolio_fit_score?: Nullable<number>;
   portfolio_fit_level?: Nullable<"high" | "medium" | "low">;
   portfolio_fit_reason?: Nullable<string>;

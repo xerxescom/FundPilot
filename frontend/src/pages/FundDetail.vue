@@ -194,7 +194,7 @@
             :value="marketText(score?.market_signal)"
             :hint="marketHint(score)"
           />
-          <MetricCard label="同类排名" :value="peerText(score)" :hint="score?.peer_reason" />
+          <MetricCard label="同类排名" :value="peerText(score)" :hint="peerHint(score)" />
           <MetricCard label="组合适配" :value="fitText(score?.portfolio_fit_level)" :hint="score?.portfolio_fit_reason" />
         </div>
 
@@ -444,6 +444,24 @@ function peerText(row?: Score | null) {
     return row.peer_group ? `${row.peer_group} 样本不足` : "暂无";
   }
   return `${Math.round(row.peer_percentile * 100)}%`;
+}
+
+function peerMetricText(row?: Score | null) {
+  const metrics = row?.peer_metric_percentiles || {};
+  const labels: Record<string, string> = {
+    return_1y: "收益",
+    max_drawdown_1y: "回撤",
+    volatility_1y: "波动",
+    sharpe_1y: "Sharpe",
+  };
+  return Object.entries(labels)
+    .filter(([key]) => metrics[key] !== undefined)
+    .map(([key, label]) => `${label}${Math.round(metrics[key] * 100)}%`)
+    .join(" · ");
+}
+
+function peerHint(row?: Score | null) {
+  return [row?.peer_reason, peerMetricText(row)].filter(Boolean).join("；") || "暂无";
 }
 
 function fitText(level?: Score["portfolio_fit_level"] | null) {

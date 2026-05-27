@@ -359,7 +359,7 @@ def test_infer_industry_from_fund_name_and_type():
 def test_score_strategies_are_available():
     strategies = available_strategies()
 
-    assert {item["key"] for item in strategies} >= {"default", "steady", "growth", "low_drawdown"}
+    assert {item["key"] for item in strategies} >= {"default", "steady", "growth", "low_drawdown", "peer_relative"}
 
 
 def test_score_indicator_with_strategy_changes_context():
@@ -408,6 +408,51 @@ def test_top_scores_by_strategy_uses_latest_indicators(db_session):
 
     assert growth[0]["fund_code"] == "000001"
     assert steady[0]["fund_code"] == "000002"
+
+
+def test_peer_relative_strategy_uses_peer_percentile_score(db_session):
+    today = date.today()
+    rows = [
+        ("000001", Decimal("0.30"), Decimal("-0.04"), Decimal("0.08"), Decimal("1.60")),
+        ("000002", Decimal("0.04"), Decimal("-0.25"), Decimal("0.30"), Decimal("0.10")),
+        ("000003", Decimal("0.16"), Decimal("-0.12"), Decimal("0.16"), Decimal("0.80")),
+        ("000004", Decimal("0.20"), Decimal("-0.09"), Decimal("0.12"), Decimal("1.00")),
+    ]
+    for code, ret_1y, drawdown, volatility, sharpe in rows:
+        db_session.add_all(
+            [
+                Watchlist(fund_code=code, fund_name=f"测试{code}", industry="宽基", is_active=True),
+                FundInfo(
+                    fund_code=code,
+                    fund_name=f"测试{code}",
+                    fund_type="股票指数",
+                    establish_date=date(2020, 1, 1),
+                    fund_size=Decimal("30"),
+                    buy_status="开放申购",
+                ),
+                FundIndicator(
+                    fund_code=code,
+                    calc_date=today,
+                    return_1m=Decimal("0.02"),
+                    return_3m=Decimal("0.05"),
+                    return_6m=Decimal("0.10"),
+                    return_1y=ret_1y,
+                    max_drawdown_1y=drawdown,
+                    volatility_1y=volatility,
+                    sharpe_1y=sharpe,
+                    win_rate_1y=Decimal("0.56"),
+                ),
+            ]
+        )
+    db_session.commit()
+
+    scored = top_scores_by_strategy(db_session, strategy="peer_relative", limit=4)
+
+    assert scored[0]["fund_code"] == "000001"
+    assert scored[0]["strategy"] == "peer_relative"
+    assert scored[0]["total_score"] == 100
+    assert scored[0]["peer_metric_percentiles"]["return_1y"] == 1.0
+    assert scored[-1]["fund_code"] == "000002"
 
 
 def test_top_scores_by_strategy_reuses_context(monkeypatch, db_session):
