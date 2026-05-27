@@ -5,6 +5,7 @@
 <script setup lang="ts">
 import * as echarts from "echarts";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { ECHARTS_THEME } from "../utils/echartsTheme";
 
 const props = defineProps<{ option: echarts.EChartsOption }>();
 const chartRef = ref<HTMLDivElement | null>(null);
@@ -24,7 +25,7 @@ let isUnmounting = false;
 function render() {
   // 组件卸载过程中不再重建实例，避免内存泄漏
   if (isUnmounting || !chartRef.value) return;
-  chart ||= echarts.init(chartRef.value);
+  chart ||= echarts.init(chartRef.value, ECHARTS_THEME);
   chart.setOption(props.option, true);
 }
 

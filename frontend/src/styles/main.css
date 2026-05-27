@@ -4,7 +4,7 @@
 
 :root {
   /* ----------------------------------------------------------
-     1. 基础色相 HSL 分量（供衍生色计算使用）
+     1. 基础色相 HSL 分量
   ---------------------------------------------------------- */
   --primary-h: 221;
   --primary-s: 83%;
@@ -20,7 +20,7 @@
   --danger-l: 47%;
 
   /* ----------------------------------------------------------
-     2. Element Plus 颜色覆盖（使用 HSL token 驱动）
+     2. Element Plus 颜色覆盖
   ---------------------------------------------------------- */
   --el-color-primary: hsl(var(--primary-h), var(--primary-s), var(--primary-l));
   --el-color-success: hsl(var(--success-h), var(--success-s), var(--success-l));
@@ -35,48 +35,44 @@
 
   /* ----------------------------------------------------------
      3. 语义化颜色 Token
-        - 所有组件的颜色均应引用这一层，避免硬编码
   ---------------------------------------------------------- */
-
-  /* 背景 / 表面 */
-  --color-bg: #f0f4f8;
-  --color-bg-end: #e2e8f0;
+  --color-bg: hsl(218, 40%, 95%);
+  --color-bg-end: hsl(230, 28%, 90%);
   --color-surface: #ffffff;
-  --color-surface-alt: #f8fafc;  /* 次级卡片、斑马行背景 */
-  --color-surface-raised: rgba(255, 255, 255, 0.85); /* 侧边栏 */
+  --color-surface-alt: #f8fafc;
+  --color-surface-raised: rgba(255, 255, 255, 0.88);
 
-  /* 边框 */
   --color-border: #e5e7eb;
-  --color-border-muted: #cbd5e1;  /* 分隔线、次级边框 */
+  --color-border-muted: #cbd5e1;
   --color-border-glass: rgba(255, 255, 255, 0.6);
 
-  /* 文字 */
   --color-text-primary: #111827;
   --color-text-secondary: #334155;
-  --color-muted: #64748b;        /* 标签、辅助文字 */
-  --color-muted-light: #94a3b8;  /* 占位、空态提示 */
+  --color-muted: #64748b;
+  --color-muted-light: #94a3b8;
 
-  /* 强调色（accent）—— 用于左侧彩色边框、图标、标记 */
-  --color-accent-blue: hsl(217, 91%, 60%);    /* 替代 #2563eb */
-  --color-accent-sky: hsl(199, 89%, 48%);     /* 替代 #0ea5e9 */
-  --color-accent-green: hsl(160, 84%, 39%);   /* 替代 #10b981 */
-  --color-accent-purple: hsl(258, 90%, 66%);  /* 替代 #8b5cf6 */
-  --color-accent-amber: hsl(38, 92%, 50%);    /* 替代 #f59e0b */
-
-  /* ----------------------------------------------------------
-     4. 毛玻璃 Token（Glassmorphism）
-  ---------------------------------------------------------- */
-  --glass-bg: rgba(255, 255, 255, 0.65);
-  --glass-border: rgba(255, 255, 255, 0.5);
-  --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05);
-  --glass-shadow-hover: 0 12px 40px 0 rgba(31, 38, 135, 0.10);
+  /* 强调色 */
+  --color-accent-blue:   hsl(217, 91%, 60%);
+  --color-accent-sky:    hsl(199, 89%, 48%);
+  --color-accent-green:  hsl(160, 84%, 39%);
+  --color-accent-purple: hsl(258, 90%, 66%);
+  --color-accent-amber:  hsl(38,  92%, 50%);
 
   /* ----------------------------------------------------------
-     5. 动效 Token（Micro-animation）
+     4. 毛玻璃 Token
   ---------------------------------------------------------- */
-  --dur-fast: 0.18s;
-  --dur-normal: 0.3s;
-  --dur-slow: 0.5s;
+  --glass-bg: rgba(255, 255, 255, 0.68);
+  --glass-border: rgba(255, 255, 255, 0.55);
+  --glass-shadow: 0 4px 24px 0 rgba(99, 120, 180, 0.07);
+  --glass-shadow-hover: 0 12px 40px 0 rgba(99, 120, 180, 0.13);
+  --glass-glow: 0 0 0 1px rgba(99, 140, 255, 0.12), 0 12px 40px 0 rgba(99, 120, 180, 0.13);
+
+  /* ----------------------------------------------------------
+     5. 动效 Token
+  ---------------------------------------------------------- */
+  --dur-fast:   0.15s;
+  --dur-normal: 0.28s;
+  --dur-slow:   0.5s;
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
@@ -98,7 +94,11 @@
 
 body {
   margin: 0;
-  background: linear-gradient(135deg, var(--color-bg) 0%, var(--color-bg-end) 100%);
+  /* 带蓝紫色调的 HSL 渐变背景，更有层次感 */
+  background:
+    radial-gradient(ellipse at 20% 0%,   hsla(217, 90%, 90%, 0.55) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 100%, hsla(258, 80%, 92%, 0.45) 0%, transparent 55%),
+    linear-gradient(160deg, var(--color-bg) 0%, var(--color-bg-end) 100%);
   background-attachment: fixed;
   color: var(--color-text-primary);
   font-family:
@@ -113,29 +113,43 @@ body {
   min-height: 100vh;
 }
 
+/* ── 侧边栏 ─────────────────────────────────────────────── */
 .sidebar {
   background: var(--color-surface-raised);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-right: 1px solid var(--color-border-glass);
-  box-shadow: 1px 0 10px rgba(0, 0, 0, 0.02);
+  box-shadow: 2px 0 16px rgba(99, 120, 180, 0.06);
   transition: box-shadow var(--dur-normal) var(--ease-smooth);
   z-index: 10;
 }
 
 .sidebar:hover {
-  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.06);
+  box-shadow: 4px 0 24px rgba(99, 120, 180, 0.10);
 }
 
+/* ── Brand 区域（渐变文字 + 蓝点装饰）─────────────────── */
 .brand {
   height: 74px;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .brand-title {
+  position: relative;
+  display: inline-block;
   font-size: 20px;
-  font-weight: 760;
+  font-weight: 800;
+  /* 渐变文字 */
+  background: linear-gradient(
+    110deg,
+    var(--color-accent-blue) 0%,
+    var(--color-accent-purple) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.3px;
 }
 
 .brand-subtitle,
@@ -145,21 +159,54 @@ body {
   font-size: 13px;
 }
 
+/* ── 导航菜单 ────────────────────────────────────────────── */
 .nav-menu {
   border-right: none;
   background: transparent;
 }
 
+/* 菜单项 hover 滑动效果 */
+.nav-menu .el-menu-item {
+  transition:
+    background var(--dur-fast) var(--ease-smooth),
+    color var(--dur-fast) var(--ease-smooth),
+    transform var(--dur-fast) var(--ease-smooth),
+    padding-left var(--dur-fast) var(--ease-smooth) !important;
+  border-radius: var(--radius-md);
+  margin: 2px 8px;
+  width: calc(100% - 16px);
+}
+
+.nav-menu .el-menu-item:hover {
+  background: rgba(99, 140, 255, 0.07) !important;
+  transform: translateX(4px);
+}
+
+/* Active pill 样式：左侧亮条 + 半透明蓝色背景 */
+.nav-menu .el-menu-item.is-active {
+  background: linear-gradient(
+    90deg,
+    hsla(217, 91%, 60%, 0.12) 0%,
+    hsla(217, 91%, 60%, 0.04) 100%
+  ) !important;
+  border-left: 3px solid var(--color-accent-blue);
+  padding-left: calc(var(--el-menu-base-level-padding) - 3px) !important;
+  color: var(--color-accent-blue) !important;
+  font-weight: 600;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* ── Topbar ──────────────────────────────────────────────── */
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   height: 74px;
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--color-border-glass);
-  box-shadow: 0 1px 10px rgba(0, 0, 0, 0.02);
+  box-shadow: 0 1px 10px rgba(99, 120, 180, 0.04);
   z-index: 5;
 }
 
@@ -167,6 +214,10 @@ body {
   font-size: 20px;
   font-weight: 760;
 }
+
+/* ============================================================
+   内容区域
+   ============================================================ */
 
 .content {
   padding: 20px;
@@ -191,7 +242,7 @@ body {
 }
 
 /* ============================================================
-   Panel — 毛玻璃卡片
+   Panel — 毛玻璃卡片（含 hover 光晕）
    ============================================================ */
 
 .panel {
@@ -204,12 +255,15 @@ body {
   box-shadow: var(--glass-shadow);
   transition:
     transform var(--dur-normal) var(--ease-smooth),
-    box-shadow var(--dur-normal) var(--ease-smooth);
+    box-shadow var(--dur-normal) var(--ease-smooth),
+    border-color var(--dur-normal) var(--ease-smooth);
 }
 
 .panel:hover {
   transform: translateY(-2px);
-  box-shadow: var(--glass-shadow-hover);
+  /* 蓝紫色光晕 + 更深阴影 */
+  box-shadow: var(--glass-glow);
+  border-color: rgba(255, 255, 255, 0.75);
 }
 
 /* ============================================================
@@ -224,14 +278,41 @@ body {
   transform: scale(0.95);
 }
 
+/* 表格行 hover 过渡 */
+.el-table__row {
+  transition: background var(--dur-fast) var(--ease-smooth);
+}
+
 /* ============================================================
-   网格布局工具类
+   网格布局工具类 + stagger 进场动画
    ============================================================ */
 
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+/* stagger：nth-child 错落延迟，每张卡片间隔 60ms */
+.metric-grid > *:nth-child(1) { animation-delay: 0ms; }
+.metric-grid > *:nth-child(2) { animation-delay: 60ms; }
+.metric-grid > *:nth-child(3) { animation-delay: 120ms; }
+.metric-grid > *:nth-child(4) { animation-delay: 180ms; }
+.metric-grid > *:nth-child(5) { animation-delay: 240ms; }
+
+.metric-grid > * {
+  animation: card-stagger-in var(--dur-normal) var(--ease-spring) both;
+}
+
+@keyframes card-stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .two-col {
@@ -316,7 +397,7 @@ body {
 }
 
 /* ============================================================
-   路由切换过渡动画（page transition）
+   路由切换过渡动画
    ============================================================ */
 
 .page-enter-active {

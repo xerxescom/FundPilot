@@ -2,26 +2,26 @@
   <PageSkeleton v-if="loading && !data" />
   <div v-else v-loading="loading" element-loading-text="正在刷新今日驾驶舱...">
     <div class="metric-grid">
-      <MetricCard label="自选基金" :value="data?.watchlist_count ?? 0" />
-      <MetricCard label="待办事项" :value="todos.length" />
-      <MetricCard label="未读预警" :value="alerts.length" />
-      <MetricCard label="最新日报" :value="latestReportTime" />
+      <MetricCard label="自选基金" :value="data?.watchlist_count ?? 0" accent="blue" />
+      <MetricCard label="待办事项" :value="todos.length" accent="amber" />
+      <MetricCard label="未读预警" :value="alerts.length" accent="amber" />
+      <MetricCard label="最新日报" :value="latestReportTime" accent="sky" />
     </div>
 
     <div class="section panel">
       <h2 class="section-title">评分信号概览</h2>
       <div class="metric-grid">
         <button class="metric-action" @click="go('/scores')">
-          <MetricCard label="已评分基金" :value="scoreSummary?.total_scored ?? 0" />
+          <MetricCard label="已评分基金" :value="scoreSummary?.total_scored ?? 0" accent="blue" />
         </button>
         <button class="metric-action" @click="goScoreSignal(['favorable'])">
-          <MetricCard label="窗口较好" :value="scoreSummary?.favorable_count ?? 0" />
+          <MetricCard label="窗口较好" :value="scoreSummary?.favorable_count ?? 0" accent="green" />
         </button>
         <button class="metric-action" @click="goScoreSignal(['watch'])">
-          <MetricCard label="可以观察" :value="scoreSummary?.watch_count ?? 0" />
+          <MetricCard label="可以观察" :value="scoreSummary?.watch_count ?? 0" accent="sky" />
         </button>
         <button class="metric-action" @click="goScoreSignal(['wait_pullback', 'cautious', 'blocked'])">
-          <MetricCard label="谨慎/等待" :value="scoreSummary?.cautious_count ?? 0" />
+          <MetricCard label="谨慎/等待" :value="scoreSummary?.cautious_count ?? 0" accent="amber" />
         </button>
       </div>
       <div v-if="scoreSummary?.top_risks.length" class="risk-chip-row">
