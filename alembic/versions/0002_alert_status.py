@@ -1,7 +1,7 @@
 """Add alert status.
 
 Revision ID: 0002_alert_status
-Revises: 0001_initial_schema
+Revises: 0002_schema_additive_columns
 Create Date: 2026-05-25
 """
 
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0002_alert_status"
-down_revision = "0001_initial_schema"
+down_revision = "0002_schema_additive_columns"
 branch_labels = None
 depends_on = None
 
