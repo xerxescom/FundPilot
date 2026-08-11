@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    asset,
     alert,
     correlation,
     dashboard,
@@ -16,6 +17,7 @@ from app.api.v1 import (
 )
 
 api_router = APIRouter()
+api_router.include_router(asset.router, prefix="/assets", tags=["assets"])
 api_router.include_router(fund.router, prefix="/funds", tags=["funds"])
 api_router.include_router(watchlist.router, prefix="/watchlist", tags=["watchlist"])
 api_router.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])

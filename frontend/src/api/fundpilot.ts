@@ -16,9 +16,13 @@ import type {
   ScoreTrendRow,
   SyncDiagnostics,
   WatchlistItem,
+  Asset,
 } from "./types";
 
 export const api = {
+  assets: (assetType?: string) => getJson<Asset[]>("/assets", assetType ? { asset_type: assetType } : undefined),
+  syncAsset: (code: string, assetType: "stock" | "etf") =>
+    postJson<{ asset: Asset; synced_rows: number }>(`/assets/${code}/sync`, { asset_type: assetType }),
   dashboard: () => getJson<unknown>("/dashboard/overview"),
   dashboardToday: () => getJson<unknown>("/dashboard/today"),
   watchlist: () => getJson<WatchlistItem[]>("/watchlist"),

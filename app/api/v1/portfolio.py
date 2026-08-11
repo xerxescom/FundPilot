@@ -31,8 +31,10 @@ def create_transaction(payload: PortfolioTransactionCreate, db: Session = Depend
 
 
 @router.get("/transactions", response_model=list[PortfolioTransactionOut])
-def list_transactions(fund_code: str | None = None, db: Session = Depends(get_db)):
-    return portfolio_service.list_transactions(db, fund_code)
+def list_transactions(
+    fund_code: str | None = None, asset_code: str | None = None, db: Session = Depends(get_db)
+):
+    return portfolio_service.list_transactions(db, fund_code, asset_code)
 
 
 @router.delete("/transactions/{transaction_id}")

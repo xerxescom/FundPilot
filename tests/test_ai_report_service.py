@@ -34,10 +34,13 @@ def test_daily_report_data_includes_fund_name(db_session):
 
 
 def test_daily_report_fallback_records_metadata(monkeypatch, db_session):
-    def fake_generate(self, prompt):
-        return "建议立即买入并保证收益"
+    class FakeClient:
+        model_name = "test-ai"
 
-    monkeypatch.setattr(report_service.OllamaClient, "generate", fake_generate)
+        def generate(self, prompt):
+            return "建议立即买入并保证收益"
+
+    monkeypatch.setattr(report_service, "get_ai_client", lambda: FakeClient())
 
     report = report_service.generate_daily_report(db_session)
 

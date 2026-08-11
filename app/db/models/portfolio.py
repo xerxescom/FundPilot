@@ -12,6 +12,8 @@ class PortfolioPosition(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     fund_code: Mapped[str] = mapped_column(String(20), index=True)
+    asset_type: Mapped[str] = mapped_column(String(20), default="fund", server_default="fund", index=True)
+    asset_code: Mapped[str | None] = mapped_column(String(30), index=True)
     holding_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     holding_share: Mapped[Decimal | None] = mapped_column(Numeric(20, 4))
     cost_nav: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
@@ -26,6 +28,8 @@ class PortfolioTransaction(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     fund_code: Mapped[str] = mapped_column(String(20), index=True)
+    asset_type: Mapped[str] = mapped_column(String(20), default="fund", server_default="fund", index=True)
+    asset_code: Mapped[str | None] = mapped_column(String(30), index=True)
     trade_date: Mapped[date] = mapped_column(Date, index=True)
     trade_type: Mapped[str] = mapped_column(String(20), default="buy")
     amount: Mapped[Decimal] = mapped_column(Numeric(20, 4))

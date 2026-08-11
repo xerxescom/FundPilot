@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.report import ReportOut
 from app.services.ai import report_service
+from app.services.ai.client_factory import get_ai_client
 from app.services.ai.ollama_client import OllamaClient
 
 router = APIRouter()
@@ -35,6 +36,18 @@ def latest_report_context(db: Session = Depends(get_db)):
 @router.get("/ollama/status")
 def ollama_status():
     return OllamaClient().check_model_available()
+
+
+@router.get("/ai/status")
+def ai_status():
+    client = get_ai_client()
+    if hasattr(client, "check_status"):
+        return client.check_status()
+    return {
+        "provider": "ollama",
+        "configured_model": client.model_name,
+        "model_available": OllamaClient().check_model_available().get("model_available", False),
+    }
 
 
 @router.post("/fund/{fund_code}", response_model=ReportOut)

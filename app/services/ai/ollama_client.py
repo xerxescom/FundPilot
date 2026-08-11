@@ -9,6 +9,7 @@ class OllamaClient(AIClient):
         settings = get_settings()
         self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
         self.model = model or settings.ollama_model
+        self.model_name = self.model
         self.timeout = timeout if timeout is not None else settings.ollama_timeout
 
     def generate(self, prompt: str) -> str:

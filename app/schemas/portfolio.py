@@ -1,26 +1,43 @@
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PortfolioCreate(BaseModel):
-    fund_code: str
+    fund_code: str | None = None
+    asset_code: str | None = None
+    asset_type: str = Field(default="fund", pattern="^(fund|stock|etf)$")
     holding_amount: Decimal | None = None
     holding_share: Decimal | None = None
     cost_nav: Decimal | None = None
     buy_date: date | None = None
     note: str | None = None
 
+    @model_validator(mode="after")
+    def has_asset_code(self):
+        if not self.asset_code and not self.fund_code:
+            raise ValueError("asset_code is required")
+        return self
+
 
 class PortfolioTransactionCreate(BaseModel):
-    fund_code: str
+    fund_code: str | None = None
+    asset_code: str | None = None
+    asset_type: str = Field(default="fund", pattern="^(fund|stock|etf)$")
     trade_date: date
+    trade_type: str = Field(default="buy", pattern="^(buy|sell|subscription|redemption)$")
     amount: Decimal
     nav: Decimal
     share: Decimal | None = None
     fee: Decimal | None = None
     note: str | None = None
+
+    @model_validator(mode="after")
+    def has_asset_code(self):
+        if not self.asset_code and not self.fund_code:
+            raise ValueError("asset_code is required")
+        return self
 
 
 class PortfolioBuySimulationIn(BaseModel):
@@ -41,6 +58,8 @@ class PortfolioOut(BaseModel):
 
     id: int
     fund_code: str
+    asset_code: str | None = None
+    asset_type: str = "fund"
     holding_amount: Decimal | None = None
     holding_share: Decimal | None = None
     cost_nav: Decimal | None = None
@@ -53,6 +72,8 @@ class PortfolioTransactionOut(BaseModel):
 
     id: int
     fund_code: str
+    asset_code: str | None = None
+    asset_type: str = "fund"
     trade_date: date
     trade_type: str
     amount: Decimal
@@ -65,6 +86,10 @@ class PortfolioTransactionOut(BaseModel):
 class PortfolioSummary(BaseModel):
     position: PortfolioOut
     latest_nav: Decimal | None
+    latest_price: Decimal | None = None
+    asset_code: str | None = None
+    asset_type: str = "fund"
+    asset_name: str | None = None
     current_value: Decimal | None
     profit_amount: Decimal | None
     profit_rate: Decimal | None

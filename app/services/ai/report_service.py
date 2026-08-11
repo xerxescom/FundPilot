@@ -14,7 +14,7 @@ from app.services import (
     portfolio_service,
     score_service,
 )
-from app.services.ai.ollama_client import OllamaClient
+from app.services.ai.client_factory import get_ai_client
 from app.services.ai.prompt_templates import DAILY_REPORT_PROMPT, FUND_EXPLAIN_PROMPT
 
 FORBIDDEN_TERMS = ["立即买入", "立即卖出", "买入", "卖出", "重仓", "保证收益", "稳赚"]
@@ -154,7 +154,9 @@ def generate_daily_report(db: Session) -> AIReport:
     is_fallback = False
     fallback_reason = None
     try:
-        content = OllamaClient().generate(prompt)
+        client = get_ai_client()
+        model_name = client.model_name
+        content = client.generate(prompt)
         if not content:
             fallback_reason = "Ollama 返回了空内容"
             content = _fallback_with_error(data, fallback_reason)
@@ -214,7 +216,9 @@ def generate_fund_explanation(db: Session, fund_code: str) -> AIReport:
     is_fallback = False
     fallback_reason = None
     try:
-        content = OllamaClient().generate(prompt)
+        client = get_ai_client()
+        model_name = client.model_name
+        content = client.generate(prompt)
         if not content:
             fallback_reason = "Ollama 返回了空内容"
             content = _fallback_fund_explanation(fund_code, fallback_reason)

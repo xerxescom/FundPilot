@@ -283,6 +283,8 @@ export interface PortfolioOverview {
     position: {
       id: number;
       fund_code: string;
+      asset_code?: Nullable<string>;
+      asset_type: "fund" | "stock" | "etf";
       holding_amount?: Nullable<number>;
       holding_share?: Nullable<number>;
       cost_nav?: Nullable<number>;
@@ -290,10 +292,25 @@ export interface PortfolioOverview {
       note?: Nullable<string>;
     };
     latest_nav?: Nullable<number>;
+    latest_price?: Nullable<number>;
+    asset_code?: Nullable<string>;
+    asset_type: "fund" | "stock" | "etf";
+    asset_name?: Nullable<string>;
+    fund_name?: Nullable<string>;
     current_value?: Nullable<number>;
     profit_amount?: Nullable<number>;
     profit_rate?: Nullable<number>;
   }>;
+}
+
+export interface Asset {
+  id: number;
+  asset_code: string;
+  asset_type: "stock" | "etf";
+  asset_name: string;
+  market?: Nullable<string>;
+  currency: string;
+  source?: Nullable<string>;
 }
 
 export interface DataHealth {

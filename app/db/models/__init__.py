@@ -1,5 +1,6 @@
 from app.db.models.alert import AlertEvent
 from app.db.models.ai_report import AIReport
+from app.db.models.asset import AssetInfo, AssetPriceDaily
 from app.db.models.fund import FundHoldingIndustry, FundHoldingStock, FundInfo, FundNav
 from app.db.models.indicator import FundIndicator
 from app.db.models.market import MarketIndexDaily, MarketValuationDaily
@@ -11,6 +12,8 @@ from app.db.models.watchlist import Watchlist
 __all__ = [
     "AIReport",
     "AlertEvent",
+    "AssetInfo",
+    "AssetPriceDaily",
     "FundIndicator",
     "FundHoldingIndustry",
     "FundHoldingStock",

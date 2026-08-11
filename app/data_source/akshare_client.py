@@ -214,6 +214,73 @@ class AkshareFundDataSource(FundDataSource):
         df["pe_percentile"] = df["pe_ttm"].rank(pct=True)
         return df
 
+    def get_asset_info(self, asset_code: str, asset_type: str = "stock") -> dict:
+        """Return a lightweight, normalized record for a listed stock or ETF.
+
+        Quote history is the source of truth for price data.  This method intentionally
+        avoids loading an entire market-wide spot table merely to create one asset.
+        """
+        code = self._normalize_asset_code(asset_code)
+        if asset_type not in {"stock", "etf"}:
+            raise ValueError(f"Unsupported listed asset type: {asset_type}")
+        return {
+            "asset_code": code,
+            "asset_type": asset_type,
+            "asset_name": code,
+            "market": self._infer_market(code),
+            "currency": "CNY",
+            "source": self.source_name,
+        }
+
+    def get_asset_price_history(self, asset_code: str, asset_type: str = "stock") -> pd.DataFrame:
+        code = self._normalize_asset_code(asset_code)
+        try:
+            import akshare as ak
+
+            end_date = pd.Timestamp.today().strftime("%Y%m%d")
+            if asset_type == "stock":
+                raw = ak.stock_zh_a_hist(
+                    symbol=code,
+                    period="daily",
+                    start_date="20100101",
+                    end_date=end_date,
+                    adjust="qfq",
+                )
+            elif asset_type == "etf":
+                raw = ak.fund_etf_hist_em(
+                    symbol=code,
+                    period="daily",
+                    start_date="20100101",
+                    end_date=end_date,
+                    adjust="qfq",
+                )
+            else:
+                raise ValueError(f"Unsupported listed asset type: {asset_type}")
+        except Exception as exc:
+            logger.error("Failed to fetch {} history for {}: {}", asset_type, code, exc)
+            raise ValueError(f"Failed to fetch {asset_type} history for {code}") from exc
+
+        if raw is None or raw.empty:
+            raise ValueError(f"No {asset_type} history returned for {code}")
+
+        date_col = self._pick_column(raw, ["日期", "date"])
+        close_col = self._pick_column(raw, ["收盘", "close"])
+        return_col = self._pick_optional_column(raw, ["涨跌幅", "日涨跌幅", "daily_return"])
+        df = pd.DataFrame(
+            {
+                "asset_code": code,
+                "price_date": pd.to_datetime(raw[date_col], errors="coerce").dt.date,
+                "close": pd.to_numeric(raw[close_col], errors="coerce"),
+                "daily_return": self._normalize_return(raw[return_col]) if return_col else None,
+                "source": self.source_name,
+            }
+        )
+        df = df.dropna(subset=["price_date", "close"]).drop_duplicates(["asset_code", "price_date"])
+        df = df.sort_values("price_date").reset_index(drop=True)
+        if return_col is None:
+            df["daily_return"] = df["close"].pct_change()
+        return df
+
     @staticmethod
     def _pick_column(df: pd.DataFrame, candidates: list[str]) -> str:
         col = AkshareFundDataSource._pick_optional_column(df, candidates)
@@ -236,3 +303,17 @@ class AkshareFundDataSource(FundDataSource):
         if pd.notna(max_abs) and max_abs > 1:
             numeric = numeric / 100
         return numeric
+
+    @staticmethod
+    def _normalize_asset_code(asset_code: str) -> str:
+        code = str(asset_code).strip().upper()
+        digits = "".join(char for char in code if char.isdigit())
+        return digits or code
+
+    @staticmethod
+    def _infer_market(asset_code: str) -> str:
+        if asset_code.startswith(("600", "601", "603", "605", "688")):
+            return "SH"
+        if asset_code.startswith(("000", "001", "002", "003", "300", "301")):
+            return "SZ"
+        return "CN"

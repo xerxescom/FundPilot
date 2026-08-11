@@ -1,13 +1,14 @@
 # FundPilot
 
-FundPilot 是一个本地单用户基金投研助手。它用 AKShare/Eastmoney 采集基金与市场数据，用 PostgreSQL 保存净值、指标、评分、持仓、预警和报告，用 FastAPI 提供结构化接口，用 Vue 3 构建日常使用的前端工作台，并用 Ollama 或规则兜底生成谨慎的 AI 简报。
+FundPilot 是一个本地单用户投资驾驶舱。它用 AKShare/Eastmoney 采集基金、股票、ETF 与市场数据，用 PostgreSQL 保存行情、指标、评分、持仓、预警和报告，用 FastAPI 提供结构化接口，用 Vue 3 构建日常使用的前端工作台，并用 Ollama、DeepSeek 或规则兜底生成谨慎的 AI 简报。
 
 ## 核心能力
 
 - 今日驾驶舱：聚合数据健康、待办事项、关键风险、未读预警、市场背景和最新日报。
 - 自选基金管理：添加、移除、同步单只或全部自选基金，并展示分析状态。
 - 基金分析：净值、回撤、日涨跌幅、收益率、波动率、夏普比率、胜率和评分；基金解释由 AI 单独生成，避免拖慢快速分析。
-- 持仓管理：买入记录、自动汇总份额和成本、组合收益、持仓占比和组合诊断。
+- 统一持仓管理：股票、基金和 ETF 共用交易账本，支持买入、卖出、申购、赎回、自动汇总成本和持仓。
+- 股票/ETF 行情：可从持仓页同步 A 股股票或 ETF 日线，和基金净值一起计算组合市值与回撤。
 - 风险提醒：大跌、回撤、评分下降、持仓集中和高相关重复配置。
 - AI 简报：基于结构化数据生成每日复盘，失败时使用规则兜底。
 - 任务中心：前台或后台触发同步、指标、评分、预警、市场数据和日报任务。
@@ -20,7 +21,7 @@ flowchart LR
     API --> Services["业务服务 app/services"]
     Services --> DB[("PostgreSQL")]
     Services --> DataSources["AKShare / Eastmoney"]
-    Services --> Ollama["Ollama"]
+    Services --> AI["Ollama / DeepSeek"]
     Jobs["APScheduler 可选定时任务"] --> Services
     Scripts["scripts 手动任务"] --> Services
 ```
@@ -85,7 +86,12 @@ ENABLE_SCHEDULER=false
 AUTO_CREATE_TABLES=true
 OLLAMA_MODEL=qwen3:14b
 OLLAMA_TIMEOUT=180
+AI_PROVIDER=ollama
+DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-v4-flash
 ```
+
+启用在线 DeepSeek 后，将 `AI_PROVIDER=deepseek`，并在本地 `.env` 配置 `DEEPSEEK_API_KEY`。密钥只应保存在后端环境变量中，不要提交到 Git 或浏览器代码。
 
 `ENABLE_SCHEDULER=false` 默认不自动跑定时任务，避免本地启动后立刻拉取外部数据。`AUTO_CREATE_TABLES=true` 仅用于开发期快速启动，正式路径建议执行 Alembic 迁移。
 

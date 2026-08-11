@@ -41,6 +41,7 @@ def init_db() -> None:
 
     from app.db.models import (  # noqa: F401
         alert,
+        asset,
         ai_report,
         fund,
         indicator,
@@ -89,6 +90,20 @@ def ensure_schema_compatibility() -> None:
             "columns": columns_for("alert_event"),
             "missing": {
                 "status": "VARCHAR(20) DEFAULT 'unread'",
+            },
+        },
+        "portfolio_position": {
+            "columns": columns_for("portfolio_position"),
+            "missing": {
+                "asset_type": "VARCHAR(20) DEFAULT 'fund'",
+                "asset_code": "VARCHAR(30)",
+            },
+        },
+        "portfolio_transaction": {
+            "columns": columns_for("portfolio_transaction"),
+            "missing": {
+                "asset_type": "VARCHAR(20) DEFAULT 'fund'",
+                "asset_code": "VARCHAR(30)",
             },
         },
     }

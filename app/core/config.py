@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3:14b"
     ollama_timeout: float = 180.0
     online_llm_api_key: str = ""
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_timeout: float = 90.0
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
