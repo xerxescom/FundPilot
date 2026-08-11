@@ -1,4 +1,4 @@
-import { deleteJson, getJson, patchJson, postJson, putJson } from "./client";
+import { apiClient, deleteJson, getJson, patchJson, postJson, putJson } from "./client";
 import type {
   Alert,
   AnalyzeResult,
@@ -9,6 +9,8 @@ import type {
   MarketContext,
   PortfolioBuySimulation,
   PortfolioOverview,
+  HoldingScreenshotImportResult,
+  HoldingScreenshotRecognition,
   Report,
   Score,
   ScoreSignalSummary,
@@ -53,6 +55,14 @@ export const api = {
   generateAlerts: () => postJson<Alert[]>("/alerts/generate"),
   updateAlert: (id: number, status: string) => patchJson<Alert>(`/alerts/${id}`, { status }),
   portfolioOverview: () => getJson<PortfolioOverview>("/portfolio/overview"),
+  recognizeHoldingScreenshot: async (file: File) => {
+    const data = new FormData();
+    data.append("file", file);
+    const response = await apiClient.post<HoldingScreenshotRecognition>("/portfolio/screenshot/recognize", data);
+    return response.data;
+  },
+  importHoldingScreenshot: (data: { holdings: unknown[]; as_of_date: string }) =>
+    postJson<HoldingScreenshotImportResult>("/portfolio/screenshot/import", data),
   portfolioDiagnosis: () => getJson<unknown>("/portfolio/diagnosis"),
   simulatePortfolioBuy: (data: { fund_code: string; amount: number }) =>
     postJson<PortfolioBuySimulation>("/portfolio/simulate-buy", data),

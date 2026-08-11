@@ -303,6 +303,30 @@ export interface PortfolioOverview {
   }>;
 }
 
+export interface HoldingScreenshotDraft {
+  asset_code: string;
+  asset_type: "fund" | "stock" | "etf";
+  asset_name?: Nullable<string>;
+  holding_share: number;
+  cost_price?: Nullable<number>;
+  current_price?: Nullable<number>;
+  market_value?: Nullable<number>;
+  confidence?: Nullable<number>;
+}
+
+export interface HoldingScreenshotRecognition {
+  provider: string;
+  model: string;
+  holdings: HoldingScreenshotDraft[];
+  warning: string;
+}
+
+export interface HoldingScreenshotImportResult {
+  created: number;
+  updated: number;
+  skipped: Array<{ asset_code: string; reason: string }>;
+}
+
 export interface Asset {
   id: number;
   asset_code: string;

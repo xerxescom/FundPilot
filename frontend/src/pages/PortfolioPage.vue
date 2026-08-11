@@ -1,5 +1,17 @@
 <template>
   <div v-loading="loading" element-loading-text="正在更新持仓和组合诊断...">
+    <div class="panel screenshot-import">
+      <div class="section-heading">
+        <div>
+          <h2 class="section-title">中信证券持仓截图导入</h2>
+          <p class="muted">识别结果会先生成可编辑草稿；确认后只更新没有交易流水的手工持仓，原图不会保存。</p>
+        </div>
+        <el-upload accept="image/png,image/jpeg,image/webp" :auto-upload="false" :show-file-list="false" :on-change="recognizeHoldingScreenshot">
+          <el-button type="primary" :loading="recognizing">上传截图并识别</el-button>
+        </el-upload>
+      </div>
+    </div>
+
     <div class="panel">
       <h2 class="section-title">记录交易</h2>
       <el-form :model="transaction" inline>
@@ -97,17 +109,37 @@
         <el-table-column label="操作" width="150"><template #default="{ row }"><el-button link type="danger" @click="deleteTransaction(row.id)">删除并重新汇总</el-button></template></el-table-column>
       </el-table>
     </div>
+    <el-dialog v-model="screenshotDialogOpen" title="核对持仓识别结果" width="min(1100px, 96vw)" destroy-on-close>
+      <el-alert type="warning" :closable="false" show-icon title="请逐行核对后再导入" description="识别不清的字段会留空。已有交易流水的资产会被自动跳过，不会覆盖交易账本。" />
+      <el-form class="import-date" inline>
+        <el-form-item label="截图日期"><el-date-picker v-model="screenshotAsOfDate" value-format="YYYY-MM-DD" /></el-form-item>
+      </el-form>
+      <el-table :data="screenshotDrafts" border max-height="440">
+        <el-table-column label="类型" width="110"><template #default="{ row }"><el-select v-model="row.asset_type"><el-option label="基金" value="fund" /><el-option label="股票" value="stock" /><el-option label="ETF" value="etf" /></el-select></template></el-table-column>
+        <el-table-column label="代码" width="120"><template #default="{ row }"><el-input v-model="row.asset_code" /></template></el-table-column>
+        <el-table-column label="名称" min-width="140"><template #default="{ row }"><el-input v-model="row.asset_name" /></template></el-table-column>
+        <el-table-column label="持有数量" width="150"><template #default="{ row }"><el-input-number v-model="row.holding_share" :min="0" controls-position="right" /></template></el-table-column>
+        <el-table-column label="成本价" width="130"><template #default="{ row }"><el-input-number v-model="row.cost_price" :min="0" :precision="4" controls-position="right" /></template></el-table-column>
+        <el-table-column label="现价/净值" width="140"><template #default="{ row }"><el-input-number v-model="row.current_price" :min="0" :precision="4" controls-position="right" /></template></el-table-column>
+        <el-table-column label="市值" width="140"><template #default="{ row }"><el-input-number v-model="row.market_value" :min="0" controls-position="right" /></template></el-table-column>
+        <el-table-column label="操作" width="70"><template #default="{ $index }"><el-button link type="danger" @click="screenshotDrafts.splice($index, 1)">移除</el-button></template></el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="screenshotDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="importingScreenshot" :disabled="!screenshotDrafts.length" @click="importHoldingScreenshot">确认导入 {{ screenshotDrafts.length }} 项</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ElMessage } from "element-plus";
+import { ElMessage, type UploadFile } from "element-plus";
 import type { EChartsOption } from "echarts";
 import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "../api/fundpilot";
 import { money, pct } from "../api/format";
-import type { Asset, PortfolioBuySimulation, PortfolioDiagnosis, PortfolioOverview, WatchlistItem } from "../api/types";
+import type { Asset, HoldingScreenshotDraft, PortfolioBuySimulation, PortfolioDiagnosis, PortfolioOverview, WatchlistItem } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import MetricCard from "../components/MetricCard.vue";
 
@@ -120,6 +152,11 @@ const simulation = ref<PortfolioBuySimulation | null>(null);
 const transactions = ref<Array<Record<string, unknown>>>([]);
 const watchlist = ref<WatchlistItem[]>([]);
 const assets = ref<Asset[]>([]);
+const recognizing = ref(false);
+const importingScreenshot = ref(false);
+const screenshotDialogOpen = ref(false);
+const screenshotDrafts = ref<HoldingScreenshotDraft[]>([]);
+const screenshotAsOfDate = ref(new Date().toISOString().slice(0, 10));
 const transaction = reactive({ asset_type: "fund" as "fund" | "stock" | "etf", asset_code: "", trade_type: "buy", trade_date: "", amount: 0, nav: 0, fee: 0 });
 const simulationForm = reactive({ fund_code: "", amount: 0 });
 const priceLabel = computed(() => (transaction.asset_type === "fund" ? "成交净值" : "成交价格"));
@@ -157,6 +194,26 @@ async function addTransaction() {
   loading.value = true;
   try { await api.addTransaction({ ...transaction }); ElMessage.success("交易记录已保存"); await load(); } finally { loading.value = false; }
 }
+async function recognizeHoldingScreenshot(uploadFile: UploadFile) {
+  if (!uploadFile.raw) return;
+  recognizing.value = true;
+  try {
+    const result = await api.recognizeHoldingScreenshot(uploadFile.raw);
+    screenshotDrafts.value = result.holdings.map((item) => ({ ...item }));
+    screenshotDialogOpen.value = true;
+    ElMessage.success(`已识别 ${result.holdings.length} 项持仓，请核对后确认导入`);
+  } finally { recognizing.value = false; }
+}
+async function importHoldingScreenshot() {
+  importingScreenshot.value = true;
+  try {
+    const result = await api.importHoldingScreenshot({ holdings: screenshotDrafts.value, as_of_date: screenshotAsOfDate.value });
+    screenshotDialogOpen.value = false;
+    const skipped = result.skipped.length ? `；跳过 ${result.skipped.length} 项已有交易流水的资产` : "";
+    ElMessage.success(`导入完成：新增 ${result.created} 项，更新 ${result.updated} 项${skipped}`);
+    await load();
+  } finally { importingScreenshot.value = false; }
+}
 async function syncAsset() {
   loading.value = true;
   try { const result = await api.syncAsset(transaction.asset_code, transaction.asset_type as "stock" | "etf"); ElMessage.success(`已同步 ${result.synced_rows} 条行情`); await load(); } finally { loading.value = false; }
@@ -172,4 +229,7 @@ onMounted(load);
 .alert-item { margin-top: 10px; }
 .simulation-grid { margin-top: 10px; }
 .type-select { width: 110px; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.screenshot-import { margin-bottom: 16px; }
+.import-date { margin: 16px 0 4px; }
 </style>

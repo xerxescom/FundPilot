@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 import pandas as pd
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.thresholds import get_thresholds
 from app.db.models import AssetInfo, AssetPriceDaily, FundNav, PortfolioPosition, PortfolioTransaction
 from app.db.models.fund import FundInfo
+from app.schemas.portfolio import HoldingScreenshotDraft
 from app.services import asset_service
 from app.services.nav_service import latest_nav
 
@@ -363,6 +365,102 @@ def portfolio_diagnosis(db: Session) -> dict:
         "risk_items": risk_items,
         "observation": "组合诊断仅用于风险观察和复盘，不构成买入或卖出建议。",
     }
+
+
+def import_screenshot_holdings(
+    db: Session, holdings: list[HoldingScreenshotDraft], as_of_date: date
+) -> dict:
+    """Upsert confirmed broker snapshots without inventing transaction history."""
+    created = 0
+    updated = 0
+    skipped: list[dict[str, str]] = []
+    for holding in holdings:
+        asset_type = holding.asset_type
+        asset_code = asset_service.normalize_asset_code(holding.asset_code, asset_type)
+        has_transactions = db.scalar(
+            select(PortfolioTransaction.id)
+            .where(
+                PortfolioTransaction.asset_type == asset_type,
+                PortfolioTransaction.asset_code == asset_code,
+            )
+            .limit(1)
+        )
+        if has_transactions:
+            skipped.append({"asset_code": asset_code, "reason": "已有交易流水，未用截图覆盖成本与持仓"})
+            continue
+
+        _upsert_screenshot_asset_metadata(db, holding, asset_code, as_of_date)
+        position = db.scalar(
+            select(PortfolioPosition).where(
+                PortfolioPosition.asset_type == asset_type,
+                PortfolioPosition.asset_code == asset_code,
+            )
+        )
+        cost_price = Decimal(holding.cost_price) if holding.cost_price is not None else None
+        values = {
+            "holding_share": _quantize(Decimal(holding.holding_share), "0.0001"),
+            "holding_amount": _quantize(Decimal(holding.holding_share) * cost_price, "0.0001")
+            if cost_price is not None
+            else None,
+            "cost_nav": _quantize(cost_price, "0.000001") if cost_price is not None else None,
+            "buy_date": as_of_date,
+        }
+        if position:
+            for key, value in values.items():
+                setattr(position, key, value)
+            if not position.note:
+                position.note = f"由中信证券持仓截图导入（{as_of_date.isoformat()}）"
+            updated += 1
+        else:
+            db.add(
+                PortfolioPosition(
+                    fund_code=asset_code,
+                    asset_type=asset_type,
+                    asset_code=asset_code,
+                    note=f"由中信证券持仓截图导入（{as_of_date.isoformat()}）",
+                    **values,
+                )
+            )
+            created += 1
+    db.commit()
+    return {"created": created, "updated": updated, "skipped": skipped}
+
+
+def _upsert_screenshot_asset_metadata(
+    db: Session, holding: HoldingScreenshotDraft, asset_code: str, as_of_date: date
+) -> None:
+    """Persist confirmed labels and the dated screenshot price until regular sync replaces it."""
+    snapshot_price = holding.current_price
+    if snapshot_price is None and holding.market_value is not None:
+        snapshot_price = Decimal(holding.market_value) / Decimal(holding.holding_share)
+    if holding.asset_type == "fund":
+        fund = db.scalar(select(FundInfo).where(FundInfo.fund_code == asset_code))
+        if fund is None:
+            db.add(FundInfo(fund_code=asset_code, fund_name=holding.asset_name or asset_code, fund_type="未知", source="citic_screenshot"))
+        elif holding.asset_name:
+            fund.fund_name = holding.asset_name
+        if snapshot_price is not None:
+            nav = db.scalar(select(FundNav).where(FundNav.fund_code == asset_code, FundNav.nav_date == as_of_date))
+            if nav is None:
+                db.add(FundNav(fund_code=asset_code, nav_date=as_of_date, unit_nav=_quantize(Decimal(snapshot_price), "0.000001"), accumulated_nav=None, daily_return=None, source="citic_screenshot"))
+            else:
+                nav.unit_nav = _quantize(Decimal(snapshot_price), "0.000001")
+                nav.source = "citic_screenshot"
+        return
+
+    asset = asset_service.get_asset(db, asset_code)
+    if asset is None:
+        asset = AssetInfo(asset_code=asset_code, asset_type=holding.asset_type, asset_name=holding.asset_name or asset_code, market="CN", currency="CNY", source="citic_screenshot")
+        db.add(asset)
+    elif holding.asset_name:
+        asset.asset_name = holding.asset_name
+    if snapshot_price is not None:
+        price = db.scalar(select(AssetPriceDaily).where(AssetPriceDaily.asset_code == asset_code, AssetPriceDaily.price_date == as_of_date))
+        if price is None:
+            db.add(AssetPriceDaily(asset_code=asset_code, price_date=as_of_date, close=_quantize(Decimal(snapshot_price), "0.000001"), daily_return=None, source="citic_screenshot"))
+        else:
+            price.close = _quantize(Decimal(snapshot_price), "0.000001")
+            price.source = "citic_screenshot"
 
 
 def _portfolio_value_by_fund(db: Session) -> dict[str, Decimal]:

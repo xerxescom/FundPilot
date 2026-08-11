@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.portfolio import (
     PortfolioCreate,
     PortfolioBuySimulationIn,
+    HoldingScreenshotImportIn,
+    HoldingScreenshotImportOut,
+    HoldingScreenshotRecognitionOut,
     PortfolioOut,
     PortfolioOverview,
     PortfolioSummary,
@@ -13,8 +16,36 @@ from app.schemas.portfolio import (
     PortfolioUpdate,
 )
 from app.services import correlation_service, portfolio_service
+from app.services.ai.qwen_vision_client import QwenVisionClient
 
 router = APIRouter()
+
+
+@router.post("/screenshot/recognize", response_model=HoldingScreenshotRecognitionOut)
+async def recognize_holding_screenshot(file: UploadFile = File(...)):
+    content_type = file.content_type or ""
+    try:
+        image_bytes = await file.read()
+        client = QwenVisionClient()
+        holdings = client.recognize_holdings(image_bytes, content_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        status_code = 503 if "API key is not configured" in str(exc) else 502
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    finally:
+        await file.close()
+    return HoldingScreenshotRecognitionOut(
+        provider=client.provider,
+        model=client.model_name,
+        holdings=holdings,
+        warning="识别结果仅为草稿，请核对代码、数量和成本后再确认导入。原图不会保存到数据库。",
+    )
+
+
+@router.post("/screenshot/import", response_model=HoldingScreenshotImportOut)
+def import_holding_screenshot(payload: HoldingScreenshotImportIn, db: Session = Depends(get_db)):
+    return portfolio_service.import_screenshot_holdings(db, payload.holdings, payload.as_of_date)
 
 
 @router.post("", response_model=PortfolioOut)

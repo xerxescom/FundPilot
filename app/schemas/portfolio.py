@@ -103,3 +103,34 @@ class PortfolioOverview(BaseModel):
     max_weight: Decimal | None = None
     drawdown_1m: Decimal | None = None
     positions: list[PortfolioSummary]
+
+
+class HoldingScreenshotDraft(BaseModel):
+    """One editable holding row produced from a broker screenshot."""
+
+    asset_code: str = Field(min_length=1, max_length=30)
+    asset_type: str = Field(pattern="^(fund|stock|etf)$")
+    asset_name: str | None = Field(default=None, max_length=255)
+    holding_share: Decimal = Field(gt=0)
+    cost_price: Decimal | None = Field(default=None, gt=0)
+    current_price: Decimal | None = Field(default=None, gt=0)
+    market_value: Decimal | None = Field(default=None, gt=0)
+    confidence: Decimal | None = Field(default=None, ge=0, le=1)
+
+
+class HoldingScreenshotRecognitionOut(BaseModel):
+    provider: str
+    model: str
+    holdings: list[HoldingScreenshotDraft]
+    warning: str
+
+
+class HoldingScreenshotImportIn(BaseModel):
+    holdings: list[HoldingScreenshotDraft] = Field(min_length=1, max_length=100)
+    as_of_date: date = Field(default_factory=date.today)
+
+
+class HoldingScreenshotImportOut(BaseModel):
+    created: int
+    updated: int
+    skipped: list[dict[str, str]]
