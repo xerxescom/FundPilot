@@ -4,7 +4,12 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.db.models import PortfolioCashEvent, PortfolioPosition, PortfolioTransaction
+from app.db.models import (
+    PortfolioCashEvent,
+    PortfolioImportBatch,
+    PortfolioPosition,
+    PortfolioTransaction,
+)
 from app.services import account_service, csv_import_service, portfolio_service
 
 DELIVERY_HEADER = "成交日期,证券代码,证券名称,业务名称,成交价格,成交数量,成交金额,手续费,成交编号"
@@ -292,3 +297,186 @@ def test_manual_position_warning_on_preview(db_session):
     preview = csv_import_service.preview_import(db_session, file_name="x.csv", content=_delivery_content())
 
     assert any("已有手工/截图持仓" in warning for warning in preview["warnings"])
+
+
+# ---------------------------------------------------------------- 批次回滚
+
+
+def _batch(db_session, batch_id: int) -> PortfolioImportBatch:
+    return db_session.get(PortfolioImportBatch, batch_id)
+
+
+def test_rollback_committed_batch_removes_rows_and_position(db_session):
+    preview = csv_import_service.preview_import(
+        db_session, file_name="d.csv", content=_delivery_content()
+    )
+    csv_import_service.commit_import(db_session, batch_id=preview["batch_id"], rows=_importable(preview))
+    assert _transaction_count(db_session) == 2
+
+    result = csv_import_service.rollback_import(
+        db_session, batch_id=preview["batch_id"], reason="录错了"
+    )
+
+    assert result["status"] == "rolled_back"
+    assert result["counts"] == {"transactions": 2, "cash_events": 0}
+    assert result["position_effects"] == []
+    assert result["note"]
+    assert _transaction_count(db_session) == 0
+    # 自动汇总持仓随流水清空而移除
+    assert (
+        db_session.scalar(select(PortfolioPosition).where(PortfolioPosition.asset_code == "600519"))
+        is None
+    )
+    stored = _batch(db_session, preview["batch_id"])
+    assert stored.status == "rolled_back"
+    assert stored.rolled_back_at is not None
+    assert stored.rollback_reason == "录错了"
+    assert stored.notes_json["rollback"]["transactions"] == 2
+
+
+def test_rollback_statement_batch_restores_cash_balance(db_session):
+    preview = csv_import_service.preview_import(
+        db_session, file_name="s.csv", content=_statement_content()
+    )
+    csv_import_service.commit_import(db_session, batch_id=preview["batch_id"], rows=_importable(preview))
+    assert account_service.cash_balance(db_session) == Decimal("10019.0000")
+
+    result = csv_import_service.rollback_import(db_session, batch_id=preview["batch_id"])
+
+    assert result["counts"] == {"transactions": 0, "cash_events": 3}
+    assert account_service.cash_balance(db_session) == Decimal("0")
+    assert list(db_session.scalars(select(PortfolioCashEvent))) == []
+    assert _batch(db_session, preview["batch_id"]).rollback_reason is None
+
+
+def test_rollback_keeps_opening_and_later_manual_transactions(db_session):
+    # 导入前有手工持仓 → 提交时物化期初；导入后又有手工补录 → 回滚只删本批次的流水
+    portfolio_service.create_position(
+        db_session,
+        {
+            "fund_code": "600519",
+            "asset_type": "stock",
+            "asset_code": "600519",
+            "holding_share": Decimal("100"),
+            "holding_amount": Decimal("150000"),
+            "cost_nav": Decimal("1500"),
+            "buy_date": date(2025, 12, 1),
+        },
+    )
+    preview = csv_import_service.preview_import(
+        db_session, file_name="d.csv", content=_delivery_content()
+    )
+    csv_import_service.commit_import(db_session, batch_id=preview["batch_id"], rows=_importable(preview))
+    portfolio_service.create_transaction(
+        db_session,
+        {
+            "fund_code": "600519",
+            "asset_type": "stock",
+            "trade_date": date(2026, 3, 1),
+            "trade_type": "buy",
+            "amount": Decimal("1600"),
+            "nav": Decimal("1600"),
+            "share": Decimal("1"),
+        },
+    )
+
+    csv_import_service.rollback_import(db_session, batch_id=preview["batch_id"])
+
+    # 期初 100 股 + 导入后手工 1 股；导入的 10 买 / 2 卖已删除
+    position = db_session.scalar(
+        select(PortfolioPosition).where(PortfolioPosition.asset_code == "600519")
+    )
+    assert position.holding_share == Decimal("101.0000")
+    assert position.holding_amount == Decimal("151600.0000")
+    assert _transaction_count(db_session) == 2
+    notes = [item.note or "" for item in db_session.scalars(select(PortfolioTransaction))]
+    assert any("期初持仓" in note for note in notes)
+
+
+def test_rollback_only_touches_its_own_batch(db_session):
+    first = csv_import_service.preview_import(db_session, file_name="a.csv", content=_delivery_content())
+    csv_import_service.commit_import(db_session, batch_id=first["batch_id"], rows=_importable(first))
+    rows = "2026-03-01,600888,新疆众和,证券买入,10,100,1000,0,C200\n"
+    second = csv_import_service.preview_import(
+        db_session, file_name="b.csv", content=_delivery_content(rows=rows)
+    )
+    csv_import_service.commit_import(db_session, batch_id=second["batch_id"], rows=_importable(second))
+    assert _transaction_count(db_session) == 3
+
+    csv_import_service.rollback_import(db_session, batch_id=first["batch_id"])
+
+    remaining = list(db_session.scalars(select(PortfolioTransaction)))
+    assert [item.external_ref for item in remaining] == ["C200"]
+    assert _batch(db_session, second["batch_id"]).status in {"committed", "partial"}
+
+
+def test_rollback_partial_batch_keeps_other_rows(db_session):
+    first = csv_import_service.preview_import(db_session, file_name="a.csv", content=_delivery_content())
+    csv_import_service.commit_import(db_session, batch_id=first["batch_id"], rows=_importable(first))
+    # 第二批：C002 与首批重复，C003 是新行 → partial
+    rows = (
+        "2026-02-01,600519,贵州茅台,证券卖出,1600,2,3200,1,C002\n"
+        "2026-03-01,600519,贵州茅台,证券买入,1400,1,1400,0,C003\n"
+    )
+    second = csv_import_service.preview_import(
+        db_session, file_name="b.csv", content=_delivery_content(rows=rows)
+    )
+    committed = csv_import_service.commit_import(
+        db_session, batch_id=second["batch_id"], rows=_importable(second)
+    )
+    assert committed["status"] == "partial"
+    assert committed["counts"]["imported"] == 1
+    assert _transaction_count(db_session) == 3
+
+    csv_import_service.rollback_import(db_session, batch_id=second["batch_id"])
+
+    assert _transaction_count(db_session) == 2
+    position = db_session.scalar(
+        select(PortfolioPosition).where(PortfolioPosition.asset_code == "600519")
+    )
+    assert position.holding_share == Decimal("8.0000")
+
+
+def test_rollback_status_guards_and_missing_batch(db_session):
+    preview = csv_import_service.preview_import(
+        db_session, file_name="d.csv", content=_delivery_content()
+    )
+    with pytest.raises(ValueError, match="只有已入账或部分入账"):
+        csv_import_service.rollback_import(db_session, batch_id=preview["batch_id"])
+
+    csv_import_service.commit_import(db_session, batch_id=preview["batch_id"], rows=_importable(preview))
+    csv_import_service.rollback_import(db_session, batch_id=preview["batch_id"])
+    with pytest.raises(ValueError, match="只有已入账或部分入账"):
+        csv_import_service.rollback_import(db_session, batch_id=preview["batch_id"])
+    with pytest.raises(ValueError, match="不存在"):
+        csv_import_service.rollback_import(db_session, batch_id=99999)
+
+
+def test_commit_rejects_rolled_back_batch(db_session):
+    preview = csv_import_service.preview_import(
+        db_session, file_name="d.csv", content=_delivery_content()
+    )
+    csv_import_service.commit_import(db_session, batch_id=preview["batch_id"], rows=_importable(preview))
+    csv_import_service.rollback_import(db_session, batch_id=preview["batch_id"])
+
+    with pytest.raises(ValueError, match="已回滚"):
+        csv_import_service.commit_import(
+            db_session, batch_id=preview["batch_id"], rows=_importable(preview)
+        )
+
+
+def test_reimport_after_rollback_is_fresh(db_session):
+    content = _delivery_content()
+    preview = csv_import_service.preview_import(db_session, file_name="d.csv", content=content)
+    csv_import_service.commit_import(db_session, batch_id=preview["batch_id"], rows=_importable(preview))
+    csv_import_service.rollback_import(db_session, batch_id=preview["batch_id"])
+
+    again = csv_import_service.preview_import(db_session, file_name="d.csv", content=content)
+    assert again["counts"]["duplicate"] == 0
+    assert not any("此前已导入过" in warning for warning in again["warnings"])
+
+    result = csv_import_service.commit_import(
+        db_session, batch_id=again["batch_id"], rows=_importable(again)
+    )
+    assert result["counts"]["imported"] == 2
+    assert _transaction_count(db_session) == 2

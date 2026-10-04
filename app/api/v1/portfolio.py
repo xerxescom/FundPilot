@@ -13,6 +13,8 @@ from app.schemas.portfolio import (
     ImportBatchDetailOut,
     ImportBatchOut,
     ImportCommitIn,
+    ImportRollbackIn,
+    ImportRollbackOut,
     PortfolioCreate,
     PortfolioBuySimulationIn,
     HoldingScreenshotImportIn,
@@ -198,7 +200,21 @@ def commit_portfolio_import(payload: ImportCommitIn, db: Session = Depends(get_d
         )
     except ValueError as exc:
         detail = str(exc)
-        status = 409 if "已入账" in detail else 404 if "不存在" in detail else 400
+        status = 409 if ("已入账" in detail or "已回滚" in detail) else 404 if "不存在" in detail else 400
+        raise HTTPException(status_code=status, detail=detail) from exc
+
+
+@router.post("/imports/{batch_id}/rollback", response_model=ImportRollbackOut)
+def rollback_portfolio_import(
+    batch_id: int, payload: ImportRollbackIn | None = None, db: Session = Depends(get_db)
+):
+    try:
+        return csv_import_service.rollback_import(
+            db, batch_id=batch_id, reason=payload.reason if payload else None
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status = 409 if "可以回滚" in detail else 404 if "不存在" in detail else 400
         raise HTTPException(status_code=status, detail=detail) from exc
 
 

@@ -13,6 +13,7 @@ import type {
   ImportCommitResult,
   ImportPreview,
   ImportPreviewRow,
+  ImportRollbackResult,
   TaskBatchInfo,
   FundHoldingStock,
   FundNav,
@@ -92,6 +93,8 @@ export const api = {
   },
   commitPortfolioImport: (batchId: number, rows: ImportPreviewRow[]) =>
     postJson<ImportCommitResult>("/portfolio/imports/commit", { batch_id: batchId, rows }),
+  rollbackPortfolioImport: (batchId: number, reason?: string) =>
+    postJson<ImportRollbackResult>(`/portfolio/imports/${batchId}/rollback`, { reason }),
   portfolioImports: (limit = 20) => getJson<ImportBatch[]>("/portfolio/imports", { limit }),
   portfolioImportDetail: (id: number) => getJson<ImportBatch>(`/portfolio/imports/${id}`),
   cashEvents: (limit = 500) => getJson<CashEvent[]>("/portfolio/cash-events", { limit }),

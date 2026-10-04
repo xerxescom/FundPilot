@@ -420,6 +420,21 @@ export interface ImportCommitResult {
   }>;
 }
 
+export interface ImportRollbackResult {
+  batch_id: number;
+  status: string;
+  counts: { transactions: number; cash_events: number };
+  position_effects: Array<{
+    asset_type: string;
+    asset_code: string;
+    holding_share?: Nullable<number>;
+    holding_amount?: Nullable<number>;
+    cost_nav?: Nullable<number>;
+    realized_pnl_total?: Nullable<number>;
+  }>;
+  note: string;
+}
+
 export interface ImportBatch {
   id: number;
   source_kind: string;
@@ -433,6 +448,8 @@ export interface ImportBatch {
   error_count: number;
   created_at: string;
   committed_at?: Nullable<string>;
+  rolled_back_at?: Nullable<string>;
+  rollback_reason?: Nullable<string>;
   mapping_json?: unknown;
   notes_json?: unknown;
 }

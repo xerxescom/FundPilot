@@ -204,11 +204,30 @@ class ImportBatchOut(BaseModel):
     error_count: int
     created_at: datetime
     committed_at: datetime | None = None
+    rolled_back_at: datetime | None = None
+    rollback_reason: str | None = None
 
 
 class ImportBatchDetailOut(ImportBatchOut):
     mapping_json: Any | None = None
     notes_json: Any | None = None
+
+
+class ImportRollbackIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class ImportRollbackCounts(BaseModel):
+    transactions: int
+    cash_events: int
+
+
+class ImportRollbackOut(BaseModel):
+    batch_id: int
+    status: str
+    counts: ImportRollbackCounts
+    position_effects: list[dict] = Field(default_factory=list)
+    note: str
 
 
 class HoldingScreenshotDraft(BaseModel):

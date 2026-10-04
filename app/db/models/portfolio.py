@@ -85,3 +85,5 @@ class PortfolioImportBatch(Base):
     notes_json: Mapped[Any | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     committed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime)
+    rollback_reason: Mapped[str | None] = mapped_column(Text)

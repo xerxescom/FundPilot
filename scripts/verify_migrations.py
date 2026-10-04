@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
@@ -28,9 +30,20 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POSTGRES_URL = "postgresql+psycopg2://postgres:postgres@localhost:5432/postgres"
 FRESH_DB = "fundpilot_mig_fresh"
 LEGACY_DB = "fundpilot_mig_legacy"
-HEAD_REVISION = "0009_portfolio_import"
+# 降级目标：head 之下的显式版本。列级迁移按约定降级保留，downgrade -1 无法验证建表迁移的降级路径。
+DOWNGRADE_TARGET = "0008_task_batch"
 BATCH_TABLES = ("task_batch", "task_batch_item", "trade_calendar")
 IMPORT_TABLES = ("portfolio_import_batch", "portfolio_cash_event")
+
+
+def head_revision() -> str:
+    """从 alembic 脚本目录动态取 head，新增迁移后无需手改本脚本。"""
+    config = AlembicConfig(str(ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(ROOT / "alembic"))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    if head is None:
+        raise RuntimeError("alembic 未找到 head revision")
+    return head
 
 results: list[tuple[bool, str]] = []
 
@@ -115,7 +128,16 @@ def verify_fresh(admin_engine, admin_url: str) -> None:
             index_exists(engine, "portfolio_transaction", "ix_portfolio_transaction_external_ref"),
             "全新库存在 external_ref 唯一索引",
         )
-        check(current_revision(engine) == HEAD_REVISION, "全新库版本为 head", str(current_revision(engine)))
+        for column in ("rolled_back_at", "rollback_reason"):
+            check(
+                column_exists(engine, "portfolio_import_batch", column),
+                f"全新库存在 portfolio_import_batch.{column}",
+            )
+        check(
+            current_revision(engine) == head_revision(),
+            "全新库版本为 head",
+            str(current_revision(engine)),
+        )
     finally:
         engine.dispose()
 
@@ -170,6 +192,11 @@ def verify_legacy(admin_engine, admin_url: str) -> None:
         check(column_exists(engine, "ai_report", "batch_id"), "升级后存在 ai_report.batch_id")
         check(column_exists(engine, "ai_report", "trade_date"), "升级后存在 ai_report.trade_date")
         check(column_exists(engine, "portfolio_transaction", "realized_pnl"), "升级后存在 realized_pnl 列")
+        for column in ("rolled_back_at", "rollback_reason"):
+            check(
+                column_exists(engine, "portfolio_import_batch", column),
+                f"升级后存在 portfolio_import_batch.{column}",
+            )
         with engine.connect() as conn:
             log_count = conn.execute(text("SELECT count(*) FROM task_run_log")).scalar()
             position_share = conn.execute(text("SELECT holding_share FROM portfolio_position")).scalar()
@@ -189,15 +216,24 @@ def verify_legacy(admin_engine, admin_url: str) -> None:
                     "VALUES ('citic_delivery', 'previewed')"
                 )
             )
-        result = run_alembic(url, "downgrade", "-1")
-        check(result.returncode == 0, "downgrade -1 成功", result.stderr[-400:])
+        result = run_alembic(url, "downgrade", DOWNGRADE_TARGET)
+        check(result.returncode == 0, f"downgrade 到 {DOWNGRADE_TARGET} 成功", result.stderr[-400:])
         check(not table_exists(engine, "portfolio_import_batch"), "降级后 portfolio_import_batch 表已移除")
-        check(table_exists(engine, "task_batch"), "降级后 task_batch 仍在（只回退一版）")
+        check(table_exists(engine, "task_batch"), "降级后 task_batch 仍在（未回退到其之前）")
         result = run_alembic(url, "upgrade", "head")
         check(result.returncode == 0, "重复 upgrade 到 head 成功（幂等）", result.stderr[-400:])
         check(table_exists(engine, "portfolio_import_batch"), "重新升级后 portfolio_import_batch 表重建")
         check(table_exists(engine, "task_batch"), "重新升级后 task_batch 表保留")
-        check(current_revision(engine) == HEAD_REVISION, "旧库升级后版本为 head", str(current_revision(engine)))
+        for column in ("rolled_back_at", "rollback_reason"):
+            check(
+                column_exists(engine, "portfolio_import_batch", column),
+                f"重新升级后存在 portfolio_import_batch.{column}",
+            )
+        check(
+            current_revision(engine) == head_revision(),
+            "旧库升级后版本为 head",
+            str(current_revision(engine)),
+        )
     finally:
         engine.dispose()
 

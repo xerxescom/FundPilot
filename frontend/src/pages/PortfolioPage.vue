@@ -221,7 +221,18 @@
             <el-table-column prop="file_name" label="文件" min-width="160" />
             <el-table-column label="状态" width="100"><template #default="{ row }">{{ IMPORT_STATUS_LABEL[row.status] || row.status }}</template></el-table-column>
             <el-table-column label="结果" min-width="220"><template #default="{ row }">导入 {{ row.imported_count }} · 重复 {{ row.duplicate_count }} · 跳过 {{ row.skipped_count }} · 错误 {{ row.error_count }}</template></el-table-column>
-            <el-table-column label="时间" min-width="160"><template #default="{ row }">{{ (row.committed_at || row.created_at || "").slice(0, 19) }}</template></el-table-column>
+            <el-table-column label="时间" min-width="160"><template #default="{ row }">{{ (row.rolled_back_at || row.committed_at || row.created_at || "").slice(0, 19) }}</template></el-table-column>
+            <el-table-column label="操作" width="90">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.status === 'committed' || row.status === 'partial'"
+                  link
+                  type="danger"
+                  :loading="rollingBackId === row.id"
+                  @click="rollbackImport(row)"
+                >整批回滚</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </el-tab-pane>
       </el-tabs>
@@ -318,7 +329,7 @@
 </template>
 
 <script setup lang="ts">
-import { ElMessage, type UploadFile } from "element-plus";
+import { ElMessage, ElMessageBox, type UploadFile } from "element-plus";
 import type { EChartsOption } from "echarts";
 import { computed, onMounted, reactive, ref } from "vue";
 
@@ -366,6 +377,7 @@ const IMPORT_STATUS_LABEL: Record<string, string> = {
   committed: "已入账",
   partial: "部分入账",
   failed: "失败",
+  rolled_back: "已回滚",
 };
 const SOURCE_KIND_LABEL: Record<string, string> = {
   citic_delivery: "中信成交明细",
@@ -441,6 +453,7 @@ const cashForm = reactive({
   note: "",
 });
 const importBatches = ref<ImportBatch[]>([]);
+const rollingBackId = ref<number | null>(null);
 const csvDialogOpen = ref(false);
 const previewingImport = ref(false);
 const committingImport = ref(false);
@@ -504,6 +517,36 @@ async function commitCsvImport() {
     await load();
   } finally {
     committingImport.value = false;
+  }
+}
+
+async function rollbackImport(batch: ImportBatch) {
+  let reason = "";
+  try {
+    const prompt = await ElMessageBox.prompt(
+      `将删除批次 #${batch.id} 入账的交易与现金事件，并按剩余流水重新汇总持仓，此操作不可撤销。可填写回滚原因：`,
+      "整批回滚",
+      {
+        confirmButtonText: "确认回滚",
+        cancelButtonText: "取消",
+        type: "warning",
+        inputPlaceholder: "例如：列映射选错了",
+        inputValue: "",
+      }
+    );
+    reason = prompt.value || "";
+  } catch {
+    return; // 用户取消
+  }
+  rollingBackId.value = batch.id;
+  try {
+    const result = await api.rollbackPortfolioImport(batch.id, reason || undefined);
+    ElMessage.success(
+      `已回滚：删除交易 ${result.counts.transactions} 条、现金事件 ${result.counts.cash_events} 条`
+    );
+    await load();
+  } finally {
+    rollingBackId.value = null;
   }
 }
 

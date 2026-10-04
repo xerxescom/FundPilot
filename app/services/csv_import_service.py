@@ -682,7 +682,11 @@ def preview_import(
     warnings = _existing_manual_positions(db, parsed_rows)
     previous = db.scalar(
         select(PortfolioImportBatch)
-        .where(PortfolioImportBatch.file_hash == file_hash, PortfolioImportBatch.status != "failed")
+        .where(
+            PortfolioImportBatch.file_hash == file_hash,
+            # 失败与已回滚的批次没有留下任何流水，不应提示"此前已导入过"
+            PortfolioImportBatch.status.notin_(("failed", "rolled_back")),
+        )
         .order_by(PortfolioImportBatch.id.desc())
         .limit(1)
     )
@@ -770,12 +774,21 @@ def _validate_commit_rows(db: Session, rows: list[dict]) -> list[dict]:
     return validated
 
 
+ROLLBACKABLE_STATUSES = {"committed", "partial"}
+ROLLBACK_KEPT_OPENING_NOTE = (
+    "导入时为保留导入前手工/截图持仓而物化的期初流水会保留；如需完全还原为手工持仓，"
+    "请在交易页手工调整或删除该期初流水。"
+)
+
+
 def commit_import(db: Session, *, batch_id: int, rows: list[dict]) -> dict:
     batch = db.get(PortfolioImportBatch, batch_id)
     if batch is None:
         raise ValueError("导入批次不存在")
     if batch.status == "committed":
-        raise ValueError("该批次已入账；如需修正请删除对应流水后重新导入")
+        raise ValueError("该批次已入账；如需修正请先整批回滚该批次")
+    if batch.status == "rolled_back":
+        raise ValueError("该批次已回滚；如需重新导入请重新预览上传")
 
     try:
         accepted = _validate_commit_rows(db, rows)
@@ -896,9 +909,24 @@ def commit_import(db: Session, *, batch_id: int, rows: list[dict]) -> dict:
         _mark_batch_failed(db, batch_id, str(exc))
         raise
 
-    effects = []
+    return {
+        "batch_id": batch_id,
+        "status": batch.status,
+        "counts": {
+            "imported": inserted,
+            "duplicate": duplicates,
+            "skipped": batch.skipped_count,
+            "error": batch.error_count,
+        },
+        "position_effects": _position_effects(db, affected),
+    }
+
+
+def _position_effects(db: Session, affected: set[tuple[str, str]]) -> list[dict]:
+    """受影响资产的最新持仓与已实现盈亏（提交与回滚共用）。"""
+    positions = portfolio_service.list_positions(db)
+    effects: list[dict] = []
     for asset_type, asset_code in sorted(affected):
-        positions = portfolio_service.list_positions(db)
         position = next(
             (item for item in positions if portfolio_service._identity(item) == (asset_type, asset_code)),
             None,
@@ -920,17 +948,76 @@ def commit_import(db: Session, *, batch_id: int, rows: list[dict]) -> dict:
                 "realized_pnl_total": realized or Decimal("0"),
             }
         )
+    return effects
+
+
+def rollback_import(db: Session, *, batch_id: int, reason: str | None = None) -> dict:
+    """整批回滚已入账的导入：删除该批次的交易与现金事件，确定性重建受影响持仓。
+
+    只删除 import_batch_id 指向该批次的行；导入时为保留导入前手工/截图持仓而物化的
+    期初流水不在删除范围。删除后 external_ref 唯一索引随之释放，同一文件可重新导入。
+    """
+    batch = db.scalar(
+        select(PortfolioImportBatch).where(PortfolioImportBatch.id == batch_id).with_for_update()
+    )
+    if batch is None:
+        raise ValueError("导入批次不存在")
+    if batch.status not in ROLLBACKABLE_STATUSES:
+        raise ValueError("只有已入账或部分入账的批次可以回滚")
+
+    transactions = list(
+        db.scalars(
+            select(PortfolioTransaction).where(PortfolioTransaction.import_batch_id == batch.id)
+        )
+    )
+    cash_events = list(
+        db.scalars(select(PortfolioCashEvent).where(PortfolioCashEvent.import_batch_id == batch.id))
+    )
+    affected = {portfolio_service._identity(item) for item in transactions}
+
+    try:
+        # 与 commit 一致：先按排序锁持仓，再删除与重建
+        for asset_type, asset_code in sorted(affected):
+            portfolio_service._position_row(db, asset_type, asset_code, for_update=True)
+        for transaction in transactions:
+            db.delete(transaction)
+        for event in cash_events:
+            db.delete(event)
+        db.flush()
+
+        for asset_type, asset_code in sorted(affected):
+            rebuilt = portfolio_service._rebuild_position_from_transactions(
+                db, asset_type, asset_code
+            )
+            if rebuilt is None:
+                position = portfolio_service._position_row(db, asset_type, asset_code)
+                if position is not None and position.note == portfolio_service.AUTO_SUMMARY_NOTE:
+                    db.delete(position)
+
+        batch.status = "rolled_back"
+        batch.rolled_back_at = datetime.now()
+        batch.rollback_reason = (reason or "").strip()[:500] or None
+        notes = dict(batch.notes_json or {})
+        notes["rollback"] = {
+            "transactions": len(transactions),
+            "cash_events": len(cash_events),
+            "at": batch.rolled_back_at.isoformat(),
+            "reason": batch.rollback_reason,
+        }
+        batch.notes_json = notes
+        db.flush()
+        effects = _position_effects(db, affected)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     return {
-        "batch_id": batch_id,
+        "batch_id": batch.id,
         "status": batch.status,
-        "counts": {
-            "imported": inserted,
-            "duplicate": duplicates,
-            "skipped": batch.skipped_count,
-            "error": batch.error_count,
-        },
+        "counts": {"transactions": len(transactions), "cash_events": len(cash_events)},
         "position_effects": effects,
+        "note": ROLLBACK_KEPT_OPENING_NOTE,
     }
 
 

@@ -347,3 +347,53 @@ def test_import_preview_commit_and_trace_api_contract(db_session):
 
     detail = get_portfolio_import(preview["batch_id"], db_session)
     assert detail.id == preview["batch_id"]
+
+
+def test_import_rollback_api_contract(db_session):
+    import asyncio
+    import io
+
+    import pytest
+    from fastapi import HTTPException, UploadFile
+
+    from app.api.v1.portfolio import (
+        commit_portfolio_import,
+        preview_portfolio_import,
+        rollback_portfolio_import,
+    )
+    from app.schemas.portfolio import ImportCommitIn, ImportCommitRowIn, ImportRollbackIn
+
+    content = (
+        "成交日期,证券代码,证券名称,业务名称,成交价格,成交数量,成交金额,手续费,成交编号\n"
+        "2026-01-05,600519,贵州茅台,证券买入,1500,10,15000,5,API-RB-1\n"
+    ).encode("utf-8")
+    upload = UploadFile(filename="delivery.csv", file=io.BytesIO(content))
+    preview = asyncio.run(
+        preview_portfolio_import(
+            file=upload,
+            source_kind=None,
+            mapping_json=None,
+            header_row=None,
+            default_asset_type="auto",
+            db=db_session,
+        )
+    )
+    rows = [ImportCommitRowIn(**row) for row in preview["rows"] if row["status"] == "ok"]
+    commit_portfolio_import(ImportCommitIn(batch_id=preview["batch_id"], rows=rows), db_session)
+
+    rolled = rollback_portfolio_import(
+        preview["batch_id"], ImportRollbackIn(reason="接口回滚"), db_session
+    )
+    assert rolled["status"] == "rolled_back"
+    assert rolled["counts"]["transactions"] == 1
+    assert rolled["counts"]["cash_events"] == 0
+    assert rolled["position_effects"] == []
+    assert rolled["note"]
+
+    # 状态码映射：已回滚 → 409，不存在 → 404
+    with pytest.raises(HTTPException) as rolled_back_error:
+        rollback_portfolio_import(preview["batch_id"], ImportRollbackIn(), db_session)
+    assert rolled_back_error.value.status_code == 409
+    with pytest.raises(HTTPException) as missing_error:
+        rollback_portfolio_import(99999, ImportRollbackIn(), db_session)
+    assert missing_error.value.status_code == 404

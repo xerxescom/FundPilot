@@ -252,6 +252,8 @@ def test_portfolio_import_schema_and_dedup_on_postgres(pg_session):
     assert {"portfolio_import_batch", "portfolio_cash_event"} <= tables
     columns = {item["name"] for item in inspector.get_columns("portfolio_transaction")}
     assert {"external_ref", "source", "import_batch_id", "realized_pnl"} <= columns
+    batch_columns = {item["name"] for item in inspector.get_columns("portfolio_import_batch")}
+    assert {"rolled_back_at", "rollback_reason"} <= batch_columns
 
     message = (
         "成交日期,证券代码,证券名称,业务名称,成交价格,成交数量,成交金额,手续费,成交编号\n"
