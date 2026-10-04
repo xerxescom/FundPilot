@@ -44,3 +44,6 @@ target-version = "py311"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "postgres: 需要可连接的 PostgreSQL（设置 FUNDPILOT_TEST_POSTGRES_URL 后运行）",
+]

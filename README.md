@@ -110,7 +110,27 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 cd frontend
 npm.cmd run typecheck
 npm.cmd run build
+npm.cmd run test:e2e    # Playwright，自动起 SQLite 临时库的后端与前端
 ```
+
+PostgreSQL 集成校验（需要可连接的 PostgreSQL；设置维护库地址后运行）：
+
+```bash
+set FUNDPILOT_TEST_POSTGRES_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/postgres
+.venv\Scripts\python scripts\verify_migrations.py   # 全新库/旧库升级/降级幂等，临时库自动清理
+.venv\Scripts\python -m pytest -m postgres -q        # 迁移后库上的账本与任务结果链路
+```
+
+推送与 PR 由 `.github/workflows/ci.yml` 覆盖：后端测试与 ruff、前端构建、PostgreSQL 迁移矩阵与集成测试、浏览器端到端测试。
+
+## 升级与发布
+
+1. 备份数据库，例如 `docker exec fundpilot_postgres pg_dump -U postgres fund_watcher > fund_watcher_backup.sql`。
+2. 安装依赖：`uv sync --frozen`；前端 `npm ci`。
+3. 前端构建：`cd frontend && npm run build`（产物在 `frontend/dist/`）。
+4. 执行迁移（与服务启动分开）：`alembic upgrade head`。
+5. 启动后端与前端；开发环境 `AUTO_CREATE_TABLES=true` 会自动补附加列，正式环境应关闭并由步骤 4 负责。
+6. 存量手工/截图持仓如需变成显式期初账本事件：先 `python scripts/backfill_opening_holdings.py` 预览，确认后 `--apply --yes`。
 
 ## 产品边界
 
