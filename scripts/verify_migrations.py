@@ -28,8 +28,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POSTGRES_URL = "postgresql+psycopg2://postgres:postgres@localhost:5432/postgres"
 FRESH_DB = "fundpilot_mig_fresh"
 LEGACY_DB = "fundpilot_mig_legacy"
-HEAD_REVISION = "0008_task_batch"
+HEAD_REVISION = "0009_portfolio_import"
 BATCH_TABLES = ("task_batch", "task_batch_item", "trade_calendar")
+IMPORT_TABLES = ("portfolio_import_batch", "portfolio_cash_event")
 
 results: list[tuple[bool, str]] = []
 
@@ -79,6 +80,13 @@ def table_exists(engine, table: str) -> bool:
         return table in set(inspect(conn).get_table_names())
 
 
+def index_exists(engine, table: str, index_name: str) -> bool:
+    with engine.connect() as conn:
+        if table not in set(inspect(conn).get_table_names()):
+            return False
+        return index_name in {item["name"] for item in inspect(conn).get_indexes(table)}
+
+
 def current_revision(engine) -> str | None:
     with engine.connect() as conn:
         return conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
@@ -93,11 +101,20 @@ def verify_fresh(admin_engine, admin_url: str) -> None:
     engine = create_engine(url, poolclass=NullPool)
     try:
         check(column_exists(engine, "task_run_log", "result_json"), "全新库存在 result_json 列")
-        for table in BATCH_TABLES:
+        for table in BATCH_TABLES + IMPORT_TABLES:
             check(table_exists(engine, table), f"全新库存在 {table} 表")
         check(column_exists(engine, "task_run_log", "batch_id"), "全新库存在 task_run_log.batch_id")
         check(column_exists(engine, "ai_report", "batch_id"), "全新库存在 ai_report.batch_id")
         check(column_exists(engine, "ai_report", "trade_date"), "全新库存在 ai_report.trade_date")
+        for column in ("external_ref", "source", "import_batch_id", "realized_pnl"):
+            check(
+                column_exists(engine, "portfolio_transaction", column),
+                f"全新库存在 portfolio_transaction.{column}",
+            )
+        check(
+            index_exists(engine, "portfolio_transaction", "ix_portfolio_transaction_external_ref"),
+            "全新库存在 external_ref 唯一索引",
+        )
         check(current_revision(engine) == HEAD_REVISION, "全新库版本为 head", str(current_revision(engine)))
     finally:
         engine.dispose()
@@ -123,6 +140,11 @@ def verify_legacy(admin_engine, admin_url: str) -> None:
             conn.execute(text("DROP TABLE IF EXISTS task_batch_item"))
             conn.execute(text("DROP TABLE IF EXISTS task_batch"))
             conn.execute(text("DROP TABLE IF EXISTS trade_calendar"))
+            conn.execute(text("DROP TABLE IF EXISTS portfolio_cash_event"))
+            conn.execute(text("DROP TABLE IF EXISTS portfolio_import_batch"))
+            conn.execute(text("DROP INDEX IF EXISTS ix_portfolio_transaction_external_ref"))
+            for column in ("external_ref", "source", "import_batch_id", "realized_pnl"):
+                conn.execute(text(f"ALTER TABLE portfolio_transaction DROP COLUMN IF EXISTS {column}"))
             conn.execute(
                 text(
                     "INSERT INTO task_run_log (task_name, status, message) "
@@ -142,11 +164,12 @@ def verify_legacy(admin_engine, admin_url: str) -> None:
         result = run_alembic(url, "upgrade", "head")
         check(result.returncode == 0, "旧库升级到 head 成功", result.stderr[-400:])
         check(column_exists(engine, "task_run_log", "result_json"), "升级后存在 result_json 列")
-        for table in BATCH_TABLES:
+        for table in BATCH_TABLES + IMPORT_TABLES:
             check(table_exists(engine, table), f"升级后存在 {table} 表")
         check(column_exists(engine, "task_run_log", "batch_id"), "升级后存在 task_run_log.batch_id")
         check(column_exists(engine, "ai_report", "batch_id"), "升级后存在 ai_report.batch_id")
         check(column_exists(engine, "ai_report", "trade_date"), "升级后存在 ai_report.trade_date")
+        check(column_exists(engine, "portfolio_transaction", "realized_pnl"), "升级后存在 realized_pnl 列")
         with engine.connect() as conn:
             log_count = conn.execute(text("SELECT count(*) FROM task_run_log")).scalar()
             position_share = conn.execute(text("SELECT holding_share FROM portfolio_position")).scalar()
@@ -160,12 +183,20 @@ def verify_legacy(admin_engine, admin_url: str) -> None:
                     "VALUES ('daily_update', 'legacy-idempotency', 'queued')"
                 )
             )
+            conn.execute(
+                text(
+                    "INSERT INTO portfolio_import_batch (source_kind, status) "
+                    "VALUES ('citic_delivery', 'previewed')"
+                )
+            )
         result = run_alembic(url, "downgrade", "-1")
         check(result.returncode == 0, "downgrade -1 成功", result.stderr[-400:])
-        check(not table_exists(engine, "task_batch"), "降级后 task_batch 表已移除")
+        check(not table_exists(engine, "portfolio_import_batch"), "降级后 portfolio_import_batch 表已移除")
+        check(table_exists(engine, "task_batch"), "降级后 task_batch 仍在（只回退一版）")
         result = run_alembic(url, "upgrade", "head")
         check(result.returncode == 0, "重复 upgrade 到 head 成功（幂等）", result.stderr[-400:])
-        check(table_exists(engine, "task_batch"), "重新升级后 task_batch 表重建")
+        check(table_exists(engine, "portfolio_import_batch"), "重新升级后 portfolio_import_batch 表重建")
+        check(table_exists(engine, "task_batch"), "重新升级后 task_batch 表保留")
         check(current_revision(engine) == HEAD_REVISION, "旧库升级后版本为 head", str(current_revision(engine)))
     finally:
         engine.dispose()

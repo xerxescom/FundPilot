@@ -1,6 +1,6 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -27,9 +27,11 @@ class PortfolioTransactionCreate(BaseModel):
     asset_code: str | None = None
     asset_type: str = Field(default="fund", pattern="^(fund|stock|etf)$")
     trade_date: date
-    trade_type: str = Field(default="buy", pattern="^(buy|sell|subscription|redemption|opening)$")
+    trade_type: str = Field(
+        default="buy", pattern="^(buy|sell|subscription|redemption|opening|dividend_reinvest|split)$"
+    )
     amount: Decimal
-    nav: Decimal
+    nav: Decimal | None = None
     share: Decimal | None = None
     fee: Decimal | None = None
     note: str | None = None
@@ -82,6 +84,10 @@ class PortfolioTransactionOut(BaseModel):
     share: Decimal
     fee: Decimal | None = None
     note: str | None = None
+    realized_pnl: Decimal | None = None
+    source: str | None = None
+    external_ref: str | None = None
+    import_batch_id: int | None = None
 
 
 class PortfolioSummary(BaseModel):
@@ -137,6 +143,72 @@ class PortfolioOverview(BaseModel):
     drawdown_1m: Decimal | None = None
     drawdown_basis: DrawdownBasis | None = None
     positions: list[PortfolioSummary]
+
+
+class CashEventCreateIn(BaseModel):
+    event_date: date
+    event_type: str
+    amount: Decimal
+    asset_type: str | None = None
+    asset_code: str | None = None
+    note: str | None = None
+
+
+class CashEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    event_date: date
+    event_type: str
+    event_type_label: str
+    amount: Decimal
+    asset_type: str | None = None
+    asset_code: str | None = None
+    note: str | None = None
+    source: str
+    external_ref: str | None = None
+    import_batch_id: int | None = None
+    created_at: datetime
+
+
+class ImportCommitRowIn(BaseModel):
+    """预览行原样回传（可编辑）；多余字段保留，提交时按最终值重算引用。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    row_index: int
+    target: str = "trade"
+    parsed: dict | None = None
+    status: str | None = None
+    external_ref: str | None = None
+    force_import: bool = False
+
+
+class ImportCommitIn(BaseModel):
+    batch_id: int
+    rows: list[ImportCommitRowIn] = Field(max_length=5000)
+
+
+class ImportBatchOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    source_kind: str
+    file_name: str | None = None
+    file_hash: str | None = None
+    status: str
+    total_count: int
+    imported_count: int
+    duplicate_count: int
+    skipped_count: int
+    error_count: int
+    created_at: datetime
+    committed_at: datetime | None = None
+
+
+class ImportBatchDetailOut(ImportBatchOut):
+    mapping_json: Any | None = None
+    notes_json: Any | None = None
 
 
 class HoldingScreenshotDraft(BaseModel):

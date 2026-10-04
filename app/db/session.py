@@ -108,6 +108,10 @@ def ensure_schema_compatibility() -> None:
             "missing": {
                 "asset_type": "VARCHAR(20) DEFAULT 'fund'",
                 "asset_code": "VARCHAR(30)",
+                "external_ref": "VARCHAR(120)",
+                "source": "VARCHAR(30)",
+                "import_batch_id": "INTEGER",
+                "realized_pnl": "NUMERIC(20, 4)",
             },
         },
         "task_run_log": {
@@ -119,6 +123,12 @@ def ensure_schema_compatibility() -> None:
         },
     }
 
+    # 唯一索引无法通过 ALTER TABLE 添加，单独补建（SQLite/PostgreSQL 都支持 IF NOT EXISTS）
+    compat_indexes = (
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_portfolio_transaction_external_ref "
+        "ON portfolio_transaction (external_ref)",
+    )
+
     with engine.begin() as conn:
         for table_name, config in table_columns.items():
             if table_name not in table_names:
@@ -128,3 +138,6 @@ def ensure_schema_compatibility() -> None:
                     continue
                 if engine.dialect.name in {"postgresql", "sqlite"}:
                     conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"))
+        if "portfolio_transaction" in table_names and engine.dialect.name in {"postgresql", "sqlite"}:
+            for statement in compat_indexes:
+                conn.execute(text(statement))

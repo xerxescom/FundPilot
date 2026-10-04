@@ -4,7 +4,12 @@ from app.db.models.asset import AssetInfo, AssetPriceDaily
 from app.db.models.fund import FundHoldingIndustry, FundHoldingStock, FundInfo, FundNav
 from app.db.models.indicator import FundIndicator
 from app.db.models.market import MarketIndexDaily, MarketValuationDaily
-from app.db.models.portfolio import PortfolioPosition, PortfolioTransaction
+from app.db.models.portfolio import (
+    PortfolioCashEvent,
+    PortfolioImportBatch,
+    PortfolioPosition,
+    PortfolioTransaction,
+)
 from app.db.models.score import FundScore
 from app.db.models.task_batch import TaskBatch, TaskBatchItem
 from app.db.models.task_log import TaskRunLog
@@ -24,6 +29,8 @@ __all__ = [
     "FundScore",
     "MarketIndexDaily",
     "MarketValuationDaily",
+    "PortfolioCashEvent",
+    "PortfolioImportBatch",
     "PortfolioPosition",
     "PortfolioTransaction",
     "TaskBatch",

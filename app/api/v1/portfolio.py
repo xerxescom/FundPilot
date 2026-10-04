@@ -1,8 +1,12 @@
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from datetime import date
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.portfolio import (
+    CashEventCreateIn,
+    CashEventOut,
     PortfolioCreate,
     PortfolioBuySimulationIn,
     HoldingScreenshotImportIn,
@@ -15,10 +19,27 @@ from app.schemas.portfolio import (
     PortfolioTransactionOut,
     PortfolioUpdate,
 )
-from app.services import correlation_service, portfolio_service
+from app.services import account_service, correlation_service, portfolio_service
 from app.services.ai.qwen_vision_client import QwenVisionClient
 
 router = APIRouter()
+
+
+def _serialize_cash_event(event) -> dict:
+    return {
+        "id": event.id,
+        "event_date": event.event_date,
+        "event_type": event.event_type,
+        "event_type_label": account_service.CASH_EVENT_LABELS.get(event.event_type, event.event_type),
+        "amount": event.amount,
+        "asset_type": event.asset_type,
+        "asset_code": event.asset_code,
+        "note": event.note,
+        "source": event.source,
+        "external_ref": event.external_ref,
+        "import_batch_id": event.import_batch_id,
+        "created_at": event.created_at,
+    }
 
 
 @router.post("/screenshot/recognize", response_model=HoldingScreenshotRecognitionOut)
@@ -129,3 +150,50 @@ def delete_position(position_id: int, db: Session = Depends(get_db)):
     if not portfolio_service.delete_position(db, position_id):
         raise HTTPException(status_code=404, detail="Position not found")
     return {"detail": "deleted"}
+
+
+# ---------------------------------------------------------------- 现金事件
+
+
+@router.get("/cash-events", response_model=list[CashEventOut])
+def list_cash_events(
+    start: date | None = None,
+    end: date | None = None,
+    limit: int = Query(default=500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+):
+    return [
+        _serialize_cash_event(event)
+        for event in account_service.list_cash_events(db, start=start, end=end, limit=limit)
+    ]
+
+
+@router.post("/cash-events", response_model=CashEventOut)
+def create_cash_event(payload: CashEventCreateIn, db: Session = Depends(get_db)):
+    try:
+        event = account_service.create_cash_event(db, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_cash_event(event)
+
+
+@router.delete("/cash-events/{event_id}")
+def delete_cash_event(event_id: int, db: Session = Depends(get_db)):
+    if not account_service.delete_cash_event(db, event_id):
+        raise HTTPException(status_code=404, detail="Cash event not found")
+    return {"detail": "deleted"}
+
+
+# ---------------------------------------------------------------- 账户口径
+
+
+@router.get("/account/summary")
+def account_summary(db: Session = Depends(get_db)):
+    return account_service.account_summary(db)
+
+
+@router.get("/account/performance")
+def account_performance(
+    start: date | None = None, end: date | None = None, db: Session = Depends(get_db)
+):
+    return account_service.account_performance(db, start=start, end=end)

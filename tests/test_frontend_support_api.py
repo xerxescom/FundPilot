@@ -262,3 +262,39 @@ def test_score_summary_api_contract(db_session):
     assert "signal_counts" in payload
     assert "confidence_counts" in payload
     assert "top_risks" in payload
+
+
+def test_cash_event_and_account_api_contract(db_session):
+    from app.api.v1.portfolio import (
+        account_performance,
+        account_summary,
+        create_cash_event,
+        delete_cash_event,
+        list_cash_events,
+    )
+    from app.schemas.portfolio import CashEventCreateIn
+
+    created = create_cash_event(
+        CashEventCreateIn(event_date=date(2026, 1, 1), event_type="deposit", amount=Decimal("1000")),
+        db_session,
+    )
+    assert created["event_type_label"] == "入金"
+    assert created["amount"] == Decimal("1000.0000")
+    assert created["source"] == "manual"
+
+    events = list_cash_events(None, None, 500, db_session)
+    assert len(events) == 1
+    assert events[0]["event_type"] == "deposit"
+
+    summary = account_summary(db_session)
+    assert summary["cash_balance"] == Decimal("1000.0000")
+    assert summary["net_invested"] == Decimal("1000")
+    assert summary["cumulative_pnl"] == Decimal("0.000000")
+
+    performance = account_performance(None, None, db_session)
+    assert performance["coverage"]["points"] >= 1
+    assert performance["basis"] == "account_balance_replay"
+
+    assert delete_cash_event(created["id"], db_session) == {"detail": "deleted"}
+    assert list_cash_events(None, None, 500, db_session) == []
+

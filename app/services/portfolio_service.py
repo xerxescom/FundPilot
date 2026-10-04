@@ -18,6 +18,9 @@ AUTO_SUMMARY_NOTE = "由交易记录自动汇总"
 OPENING_NOTE = "期初持仓"
 SELL_TYPES = {"sell", "redemption"}
 BUY_TYPES = {"buy", "subscription", "opening"}
+REINVEST_TYPES = {"dividend_reinvest"}
+SPLIT_TYPES = {"split"}
+ALL_TRADE_TYPES = BUY_TYPES | SELL_TYPES | REINVEST_TYPES | SPLIT_TYPES
 LEDGER_MANAGED_FIELDS = {"holding_amount", "holding_share", "cost_nav", "buy_date"}
 DRAWDOWN_WINDOW = 30
 MIN_DRAWDOWN_DAYS = 2
@@ -113,25 +116,47 @@ def create_position(db: Session, data: dict) -> PortfolioPosition:
     return position
 
 
-def _replay_transactions(transactions: list[PortfolioTransaction]) -> tuple[Decimal, Decimal]:
-    """Replay the ledger chronologically; raises when a sell exceeds the shares available that day."""
+def replay_ledger_events(events: list) -> tuple[Decimal, Decimal, list[tuple[object, Decimal]]]:
+    """按时间顺序重放账本事件；卖出超过当日可用份额时抛错。
+
+    返回 (holding_share, holding_cost, [(卖出事件, 已实现盈亏), ...])。
+    事件只要求具备 trade_type / share / amount / fee / trade_date 属性，
+    因此 CSV 预览可以对未落库的行做只读模拟。
+    """
     holding_share = Decimal("0")
     holding_cost = Decimal("0")
-    for transaction in transactions:
-        share = Decimal(transaction.share)
-        amount = Decimal(transaction.amount)
-        fee = Decimal(transaction.fee or 0)
-        if transaction.trade_type in SELL_TYPES:
+    realized: list[tuple[object, Decimal]] = []
+    for event in events:
+        share = Decimal(event.share)
+        amount = Decimal(event.amount)
+        fee = Decimal(event.fee or 0)
+        trade_type = event.trade_type
+        if trade_type in SELL_TYPES:
             if share > holding_share:
                 raise ValueError(
-                    f"卖出份额超过 {transaction.trade_date} 可用持仓：需要 {share} 份，当日仅有 {holding_share} 份"
+                    f"卖出份额超过 {event.trade_date} 可用持仓：需要 {share} 份，当日仅有 {holding_share} 份"
                 )
             average_cost = holding_cost / holding_share if holding_share else Decimal("0")
+            realized.append((event, _quantize((amount - fee) - average_cost * share, "0.0001")))
             holding_cost -= average_cost * share
             holding_share -= share
-        else:
+        elif trade_type in SPLIT_TYPES:
+            if holding_share + share < 0:
+                raise ValueError(
+                    f"拆分后份额为负：{event.trade_date} 变动 {share} 份，拆分前 {holding_share} 份"
+                )
+            holding_share += share  # 拆分只改变份额，成本不变
+        elif trade_type in REINVEST_TYPES:
+            holding_share += share
+            holding_cost += amount  # 红利再投：分红被资本化，无现金进出、无费用
+        else:  # buy / subscription / opening
             holding_share += share
             holding_cost += amount + fee
+    return holding_share, holding_cost, realized
+
+
+def _replay_transactions(transactions: list[PortfolioTransaction]) -> tuple[Decimal, Decimal]:
+    holding_share, holding_cost, _ = replay_ledger_events(transactions)
     return holding_share, holding_cost
 
 
@@ -143,7 +168,9 @@ def _rebuild_position_from_transactions(
     if not transactions:
         return None
 
-    holding_share, holding_cost = _replay_transactions(transactions)
+    holding_share, holding_cost, realized_entries = replay_ledger_events(transactions)
+    for event, realized_value in realized_entries:
+        event.realized_pnl = realized_value  # 每次重建确定性重算，后补/删除流水都会自动修正
     position = _position_row(db, asset_type, asset_code)
     cost_nav = holding_cost / holding_share if holding_share else None
     values = {
@@ -168,8 +195,8 @@ def _rebuild_position_from_transactions(
     return position
 
 
-def _build_opening_transaction(position: PortfolioPosition) -> PortfolioTransaction | None:
-    """Build the dated opening event for a manual/screenshot holding without inventing cost."""
+def opening_values(position: PortfolioPosition) -> dict | None:
+    """纯函数：从手工/截图持仓推导期初事件数值；成本缺失或份额为 0 时返回 None（不编造成本）。"""
     share = Decimal(position.holding_share or 0)
     if share <= 0:
         return None
@@ -181,21 +208,35 @@ def _build_opening_transaction(position: PortfolioPosition) -> PortfolioTransact
         amount = share * nav
     if nav is None or nav <= 0 or amount is None or amount <= 0:
         return None
-
-    asset_type, asset_code = _identity(position)
     trade_date = position.buy_date or (position.created_at.date() if position.created_at else date.today())
     note = f"{OPENING_NOTE}；来源：{position.note}" if position.note else OPENING_NOTE
+    return {
+        "trade_date": trade_date,
+        "amount": _quantize(amount, "0.0001"),
+        "nav": _quantize(nav, "0.000001"),
+        "share": _quantize(share, "0.0001"),
+        "note": note,
+    }
+
+
+def _build_opening_transaction(position: PortfolioPosition) -> PortfolioTransaction | None:
+    """Build the dated opening event for a manual/screenshot holding without inventing cost."""
+    values = opening_values(position)
+    if values is None:
+        return None
+    asset_type, asset_code = _identity(position)
     return PortfolioTransaction(
         fund_code=asset_code,
         asset_type=asset_type,
         asset_code=asset_code,
-        trade_date=trade_date,
+        trade_date=values["trade_date"],
         trade_type="opening",
-        amount=_quantize(amount, "0.0001"),
-        nav=_quantize(nav, "0.000001"),
-        share=_quantize(share, "0.0001"),
+        amount=values["amount"],
+        nav=values["nav"],
+        share=values["share"],
         fee=Decimal("0"),
-        note=note,
+        note=values["note"],
+        source="opening",
     )
 
 
@@ -221,16 +262,34 @@ def ensure_opening_transaction(db: Session, position: PortfolioPosition | None) 
 def create_transaction(db: Session, data: dict) -> PortfolioTransaction:
     asset_type, asset_code = _payload_identity(data)
     amount = Decimal(data["amount"])
-    price = Decimal(data["nav"])
+    price = Decimal(data["nav"]) if data.get("nav") is not None else Decimal("0")
     fee = Decimal(data.get("fee") or 0)
     trade_type = data.get("trade_type") or "buy"
-    if trade_type not in BUY_TYPES | SELL_TYPES:
-        raise ValueError("trade_type must be buy, sell, subscription, redemption or opening")
-    if amount <= 0 or price <= 0 or fee < 0:
-        raise ValueError("amount and price must be positive, and fee cannot be negative")
+    if trade_type not in ALL_TRADE_TYPES:
+        raise ValueError(
+            "trade_type must be buy, sell, subscription, redemption, opening, dividend_reinvest or split"
+        )
     share = Decimal(data.get("share") or 0)
-    if share <= 0:
-        share = amount / price
+    if trade_type in SPLIT_TYPES:
+        if amount != 0:
+            raise ValueError("拆分交易金额必须为 0")
+        if fee != 0:
+            raise ValueError("拆分交易不支持手续费")
+        if share == 0:
+            raise ValueError("拆分交易必须填写份额变动（正数增加，负数减少）")
+        price = price or Decimal("1")  # 拆分没有成交价，占位避免空值
+    elif trade_type in REINVEST_TYPES:
+        if amount <= 0 or price <= 0:
+            raise ValueError("红利再投的金额与净值必须为正")
+        if fee != 0:
+            raise ValueError("红利再投暂不支持手续费")
+        if share <= 0:
+            share = amount / price
+    else:
+        if amount <= 0 or price <= 0 or fee < 0:
+            raise ValueError("amount and price must be positive, and fee cannot be negative")
+        if share <= 0:
+            share = amount / price
 
     _ensure_listed_asset(db, asset_type, asset_code)
     try:
@@ -261,6 +320,7 @@ def create_transaction(db: Session, data: dict) -> PortfolioTransaction:
             share=_quantize(share, "0.0001"),
             fee=_quantize(fee, "0.0001"),
             note=data.get("note"),
+            source="manual",
         )
         db.add(transaction)
         db.flush()

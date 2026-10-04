@@ -239,3 +239,63 @@ def test_task_result_json_round_trip_and_health(pg_session):
     health = fund_data_health(pg_session, "000012", today=date(2026, 5, 25))
     assert health["latest_sync_status"] == "failed"
     assert "全部数据源同步失败" in health["latest_failure_reason"]
+
+
+def test_portfolio_import_schema_and_dedup_on_postgres(pg_session):
+    from app.db.models import PortfolioCashEvent, PortfolioImportBatch, PortfolioTransaction
+    from app.services import account_service, csv_import_service
+
+    before_cash = account_service.cash_balance(pg_session)
+
+    inspector = inspect(pg_session.bind)
+    tables = set(inspector.get_table_names())
+    assert {"portfolio_import_batch", "portfolio_cash_event"} <= tables
+    columns = {item["name"] for item in inspector.get_columns("portfolio_transaction")}
+    assert {"external_ref", "source", "import_batch_id", "realized_pnl"} <= columns
+
+    message = (
+        "成交日期,证券代码,证券名称,业务名称,成交价格,成交数量,成交金额,手续费,成交编号\n"
+        "2026-01-05,600519,贵州茅台,证券买入,1500,10,15000,5,PG001\n"
+        "2026-02-01,600519,贵州茅台,证券卖出,1600,2,3200,1,PG002\n"
+    ).encode("utf-8")
+    preview = csv_import_service.preview_import(pg_session, file_name="pg.csv", content=message)
+    rows = [
+        row
+        for row in preview["rows"]
+        if row.get("status") in {"ok", "suspect"} and row.get("target") in {"trade", "cash"}
+    ]
+    result = csv_import_service.commit_import(pg_session, batch_id=preview["batch_id"], rows=rows)
+
+    assert result["counts"]["imported"] == 2
+    assert result["position_effects"][0]["realized_pnl_total"] == Decimal("198.0000")
+
+    again = csv_import_service.preview_import(pg_session, file_name="pg.csv", content=message)
+    assert again["counts"]["duplicate"] == 2
+
+    # 同一 external_ref 再插一行必须被唯一索引拒绝
+    duplicate = PortfolioTransaction(
+        fund_code="600519",
+        asset_type="stock",
+        asset_code="600519",
+        trade_date=date(2026, 3, 1),
+        trade_type="buy",
+        amount=Decimal("1"),
+        nav=Decimal("1"),
+        share=Decimal("1"),
+        external_ref="PG001",
+    )
+    pg_session.add(duplicate)
+    with pytest.raises(IntegrityError):
+        pg_session.commit()
+    pg_session.rollback()
+
+    # 现金事件与账户口径在 PostgreSQL 上往返一致
+    account_service.create_cash_event(
+        pg_session,
+        {"event_date": date(2026, 1, 1), "event_type": "opening_balance", "amount": Decimal("5000")},
+    )
+    summary = account_service.account_summary(pg_session)
+    # 断言本次增量（临时库为模块共享，其它用例也有现金流）
+    delta = summary["cash_balance"] - before_cash
+    assert delta == Decimal("5000.0000") - Decimal("15005") + Decimal("3199")
+    assert PortfolioCashEvent is not None and PortfolioImportBatch is not None
