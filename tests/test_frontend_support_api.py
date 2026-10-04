@@ -298,3 +298,52 @@ def test_cash_event_and_account_api_contract(db_session):
     assert delete_cash_event(created["id"], db_session) == {"detail": "deleted"}
     assert list_cash_events(None, None, 500, db_session) == []
 
+
+def test_import_preview_commit_and_trace_api_contract(db_session):
+    import asyncio
+    import io
+
+    from fastapi import UploadFile
+
+    from app.api.v1.portfolio import (
+        commit_portfolio_import,
+        get_portfolio_import,
+        list_portfolio_imports,
+        preview_portfolio_import,
+    )
+    from app.schemas.portfolio import ImportCommitIn, ImportCommitRowIn
+
+    content = (
+        "成交日期,证券代码,证券名称,业务名称,成交价格,成交数量,成交金额,手续费,成交编号\n"
+        "2026-01-05,600519,贵州茅台,证券买入,1500,10,15000,5,API001\n"
+    ).encode("utf-8")
+    upload = UploadFile(filename="delivery.csv", file=io.BytesIO(content))
+
+    preview = asyncio.run(
+        preview_portfolio_import(
+            file=upload,
+            source_kind=None,
+            mapping_json=None,
+            header_row=None,
+            default_asset_type="auto",
+            db=db_session,
+        )
+    )
+
+    assert preview["detected"]["source_kind"] == "citic_delivery"
+    assert preview["counts"]["importable"] == 1
+
+    rows = [ImportCommitRowIn(**row) for row in preview["rows"] if row["status"] == "ok"]
+    committed = commit_portfolio_import(
+        ImportCommitIn(batch_id=preview["batch_id"], rows=rows), db_session
+    )
+
+    assert committed["counts"]["imported"] == 1
+    assert committed["position_effects"][0]["asset_code"] == "600519"
+
+    batches = list_portfolio_imports(20, db_session)
+    assert batches[0].id == preview["batch_id"]
+    assert batches[0].status == "committed"
+
+    detail = get_portfolio_import(preview["batch_id"], db_session)
+    assert detail.id == preview["batch_id"]

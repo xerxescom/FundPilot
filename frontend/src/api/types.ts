@@ -373,6 +373,136 @@ export interface Asset {
   source?: Nullable<string>;
 }
 
+export interface ImportPreviewRow {
+  row_index: number;
+  target: "trade" | "cash" | "ignore";
+  status: "ok" | "duplicate" | "suspect" | "error";
+  reason?: Nullable<string>;
+  parsed?: Nullable<Record<string, unknown>>;
+  raw?: Record<string, string>;
+  external_ref?: Nullable<string>;
+  warnings?: string[];
+  force_import?: boolean;
+  trade_date?: Nullable<string>;
+}
+
+export interface ImportDetection {
+  source_kind?: Nullable<string>;
+  label?: Nullable<string>;
+  kind?: Nullable<string>;
+  header_row?: Nullable<number>;
+  columns: Record<string, string[]>;
+}
+
+export interface ImportPreview {
+  batch_id: number;
+  file_name: string;
+  file_hash: string;
+  encoding: string;
+  delimiter: string;
+  detected: ImportDetection;
+  counts: { total: number; importable: number; duplicate: number; suspect: number; ignored: number; error: number };
+  warnings: string[];
+  rows: ImportPreviewRow[];
+}
+
+export interface ImportCommitResult {
+  batch_id: number;
+  status: string;
+  counts: { imported: number; duplicate: number; skipped: number; error: number };
+  position_effects: Array<{
+    asset_type: string;
+    asset_code: string;
+    holding_share?: Nullable<number>;
+    holding_amount?: Nullable<number>;
+    cost_nav?: Nullable<number>;
+    realized_pnl_total?: Nullable<number>;
+  }>;
+}
+
+export interface ImportBatch {
+  id: number;
+  source_kind: string;
+  file_name?: Nullable<string>;
+  file_hash?: Nullable<string>;
+  status: string;
+  total_count: number;
+  imported_count: number;
+  duplicate_count: number;
+  skipped_count: number;
+  error_count: number;
+  created_at: string;
+  committed_at?: Nullable<string>;
+  mapping_json?: unknown;
+  notes_json?: unknown;
+}
+
+export interface CashEvent {
+  id: number;
+  event_date: string;
+  event_type: string;
+  event_type_label: string;
+  amount: number;
+  asset_type?: Nullable<string>;
+  asset_code?: Nullable<string>;
+  note?: Nullable<string>;
+  source: string;
+  external_ref?: Nullable<string>;
+  import_batch_id?: Nullable<number>;
+  created_at: string;
+}
+
+export interface AccountSummary {
+  as_of: string;
+  valuation_status: "complete" | "partial" | "empty";
+  is_complete: boolean;
+  cash_balance: number;
+  market_value?: Nullable<number>;
+  known_market_value: number;
+  total_assets?: Nullable<number>;
+  known_total_assets: number;
+  initial_investment: number;
+  opening_balance: number;
+  deposits_total: number;
+  withdrawals_total: number;
+  net_invested: number;
+  cumulative_pnl?: Nullable<number>;
+  return_rate?: Nullable<number>;
+  realized_pnl_total: number;
+  unrealized_pnl_total?: Nullable<number>;
+  other_income_total: number;
+  reconciliation_difference?: Nullable<number>;
+  missing_price_assets: MissingAsset[];
+  notes: string[];
+}
+
+export interface AccountPerformancePoint {
+  point_date: string;
+  total_assets: number;
+  cash: number;
+  market_value: number;
+  net_invested: number;
+  cumulative_pnl: number;
+  return_rate?: Nullable<number>;
+}
+
+export interface AccountPerformance {
+  points: AccountPerformancePoint[];
+  coverage: {
+    start_date?: Nullable<string>;
+    end_date?: Nullable<string>;
+    points: number;
+    included_assets: number;
+    excluded_assets: string[];
+    cost_fallback_days: number;
+    missing_price_assets: string[];
+  };
+  is_complete: boolean;
+  basis: string;
+  label: string;
+  notes: string[];
+}
+
 export interface BatchCoverage {
   trade_date?: Nullable<string>;
   calendar_source?: Nullable<string>;

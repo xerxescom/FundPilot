@@ -12,7 +12,9 @@ FundPilot 使用 SQLAlchemy ORM 和 Alembic 管理数据库结构。开发期可
 - `asset_info`：股票与 ETF 的基础信息，包含资产类型、市场、币种和数据源。
 - `asset_price_daily`：股票与 ETF 的日线收盘价和日涨跌幅。
 - `portfolio_position`：本地汇总持仓；保留 `fund_code` 兼容历史数据，新增 `asset_type` 与 `asset_code` 统一表示基金、股票和 ETF。
-- `portfolio_transaction`：统一交易流水，支持买入、卖出、申购和赎回，并按资产类型重算剩余成本与数量。
+- `portfolio_transaction`：统一交易流水，支持买入、卖出、申购、赎回、红利再投、拆分与期初事件；按资产类型重算剩余成本与数量，卖出时确定性写入 `realized_pnl`（已实现盈亏）；`external_ref`（券商编号或内容哈希，唯一索引）、`source`、`import_batch_id` 支持去重与批次追溯。
+- `portfolio_cash_event`：账户级现金事件（出入金/分红/利息/费用/调整/期初现金），金额带符号；现金余额不落库，按事件 + 交易现金流推导。
+- `portfolio_import_batch`：CSV 导入批次（来源、文件指纹、列映射、导入/重复/跳过/错误计数、失败原因），导入行通过 `import_batch_id` 关联。
 - `alert_event`：风险预警，包含未读、已读、已处理、忽略等状态。
 - `ai_report`：日报和基金解释；`batch_id`/`trade_date` 关联每日批次，`(report_type, batch_id)` 唯一约束保证同一批次只有一份日报。
 - `market_index_daily`：市场指数数据。

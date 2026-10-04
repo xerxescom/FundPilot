@@ -12,6 +12,18 @@
       </div>
     </div>
 
+    <div class="panel screenshot-import">
+      <div class="section-heading">
+        <div>
+          <h2 class="section-title">交易与资金流水 CSV 导入</h2>
+          <p class="muted">支持中信证券成交明细与资金流水（CSV / 制表符，UTF-8 或 GBK）。导入前可核对列映射与每一行，重复行自动跳过。</p>
+        </div>
+        <el-upload accept=".csv,.txt,text/csv" :auto-upload="false" :show-file-list="false" :on-change="previewCsvImport">
+          <el-button :loading="previewingImport">上传 CSV 并预览</el-button>
+        </el-upload>
+      </div>
+    </div>
+
     <div class="panel">
       <h2 class="section-title">记录交易</h2>
       <el-form :model="transaction" inline>
@@ -64,6 +76,46 @@
       title="组合估值不完整，整体盈亏暂不可用"
       :description="valuationWarning"
     />
+
+    <div class="section panel">
+      <h2 class="section-title">账户收益（现金 + 持仓）</h2>
+      <div class="metric-grid">
+        <MetricCard
+          label="账户总资产"
+          :value="money(account?.total_assets ?? account?.known_total_assets)"
+          :hint="account && !account.is_complete ? '估值不完整（已知部分）' : ''"
+        />
+        <MetricCard label="现金余额" :value="money(account?.cash_balance)" />
+        <MetricCard label="净投入" :value="money(account?.net_invested)" :hint="`含期初投入 ${money(account?.initial_investment)}`" />
+        <MetricCard label="累计盈亏" :value="money(account?.cumulative_pnl)" />
+        <MetricCard label="账户收益率" :value="pct(account?.return_rate)" />
+        <MetricCard label="已实现盈亏" :value="money(account?.realized_pnl_total)" />
+        <MetricCard label="未实现盈亏" :value="money(account?.unrealized_pnl_total)" />
+        <MetricCard label="其他收益" :value="money(account?.other_income_total)" hint="分红 / 利息 / 费用 / 红利再投" />
+      </div>
+      <el-alert
+        v-if="reconciliationWarning"
+        class="alert-item"
+        type="warning"
+        :closable="false"
+        show-icon
+        :title="`账户恒等式核对偏差：${money(account?.reconciliation_difference)}`"
+        description="累计盈亏 ≠ 已实现 + 未实现 + 其他收益，请检查流水或现金事件。"
+      />
+      <el-alert
+        v-for="note in account?.notes || []"
+        :key="note"
+        class="alert-item"
+        type="info"
+        :closable="false"
+        :title="note"
+      />
+      <div v-if="performance?.points.length" class="performance-chart"><ChartBox :option="performanceOption" /></div>
+      <p v-if="performance" class="muted">
+        {{ performance.label }}（{{ performance.coverage.start_date }} ~ {{ performance.coverage.end_date }}，
+        共 {{ performance.coverage.points }} 个点{{ performance.is_complete ? "" : "；部分日期按成本估值" }}）
+      </p>
+    </div>
 
     <div class="section panel">
       <h2 class="section-title">基金拟买入模拟</h2>
@@ -123,18 +175,56 @@
     </div>
 
     <div class="section panel">
-      <h2 class="section-title">交易记录</h2>
-      <el-table :data="transactionRows" border stripe>
-        <el-table-column prop="asset_type_label" label="类型" width="85" />
-        <el-table-column prop="asset_code" label="代码" width="110" />
-        <el-table-column prop="asset_name" label="名称" min-width="140" />
-        <el-table-column prop="trade_type_label" label="交易" width="80" />
-        <el-table-column prop="trade_date" label="交易日期" />
-        <el-table-column prop="amount" label="成交金额" />
-        <el-table-column prop="nav" label="成交价格/净值" />
-        <el-table-column prop="share" label="数量" />
-        <el-table-column label="操作" width="150"><template #default="{ row }"><el-button link type="danger" @click="deleteTransaction(row.id)">删除并重新汇总</el-button></template></el-table-column>
-      </el-table>
+      <el-tabs v-model="ledgerTab">
+        <el-tab-pane label="交易记录" name="transactions">
+          <el-table :data="transactionRows" border stripe>
+            <el-table-column prop="asset_type_label" label="类型" width="85" />
+            <el-table-column prop="asset_code" label="代码" width="110" />
+            <el-table-column prop="asset_name" label="名称" min-width="140" />
+            <el-table-column prop="trade_type_label" label="交易" width="80" />
+            <el-table-column prop="trade_date" label="交易日期" />
+            <el-table-column prop="amount" label="成交金额" />
+            <el-table-column prop="nav" label="成交价格/净值" />
+            <el-table-column prop="share" label="数量" />
+            <el-table-column label="已实现盈亏"><template #default="{ row }">{{ row.realized_pnl === null || row.realized_pnl === undefined ? "—" : money(row.realized_pnl) }}</template></el-table-column>
+            <el-table-column label="操作" width="150"><template #default="{ row }"><el-button link type="danger" @click="deleteTransaction(row.id)">删除并重新汇总</el-button></template></el-table-column>
+          </el-table>
+        </el-tab-pane>
+
+        <el-tab-pane label="现金与事件" name="cash">
+          <el-form :model="cashForm" inline>
+            <el-form-item label="类型">
+              <el-select v-model="cashForm.event_type" class="type-select-wide">
+                <el-option v-for="(label, value) in CASH_EVENT_LABEL" :key="value" :label="label" :value="value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="日期"><el-date-picker v-model="cashForm.event_date" value-format="YYYY-MM-DD" /></el-form-item>
+            <el-form-item label="金额"><el-input-number v-model="cashForm.amount" :min="0" /></el-form-item>
+            <el-form-item label="备注"><el-input v-model="cashForm.note" /></el-form-item>
+            <el-form-item><el-button type="primary" :disabled="!cashForm.amount" @click="addCashEvent">添加</el-button></el-form-item>
+          </el-form>
+          <p class="muted">入金/出金/分红/利息/费用/调整按金额符号自动规范；期初现金只能设置一次。</p>
+          <el-table :data="cashRows" border stripe>
+            <el-table-column prop="event_date" label="日期" width="120" />
+            <el-table-column prop="event_type_label" label="类型" width="100" />
+            <el-table-column label="金额"><template #default="{ row }">{{ money(row.amount) }}</template></el-table-column>
+            <el-table-column prop="note" label="备注" min-width="180" />
+            <el-table-column prop="source" label="来源" width="120" />
+            <el-table-column label="操作" width="90"><template #default="{ row }"><el-button link type="danger" @click="removeCashEvent(row.id)">删除</el-button></template></el-table-column>
+          </el-table>
+        </el-tab-pane>
+
+        <el-tab-pane label="导入批次" name="imports">
+          <el-table :data="importBatches" border stripe>
+            <el-table-column prop="id" label="批次" width="70" />
+            <el-table-column label="来源" width="150"><template #default="{ row }">{{ SOURCE_KIND_LABEL[row.source_kind] || row.source_kind }}</template></el-table-column>
+            <el-table-column prop="file_name" label="文件" min-width="160" />
+            <el-table-column label="状态" width="100"><template #default="{ row }">{{ IMPORT_STATUS_LABEL[row.status] || row.status }}</template></el-table-column>
+            <el-table-column label="结果" min-width="220"><template #default="{ row }">导入 {{ row.imported_count }} · 重复 {{ row.duplicate_count }} · 跳过 {{ row.skipped_count }} · 错误 {{ row.error_count }}</template></el-table-column>
+            <el-table-column label="时间" min-width="160"><template #default="{ row }">{{ (row.committed_at || row.created_at || "").slice(0, 19) }}</template></el-table-column>
+          </el-table>
+        </el-tab-pane>
+      </el-tabs>
     </div>
     <el-dialog v-model="screenshotDialogOpen" title="核对持仓识别结果" width="min(1100px, 96vw)" destroy-on-close>
       <el-alert type="warning" :closable="false" show-icon title="请逐行核对后再导入" description="识别不清的字段会留空。已有交易流水的资产会被自动跳过，不会覆盖交易账本。" />
@@ -156,6 +246,74 @@
         <el-button type="primary" :loading="importingScreenshot" :disabled="!screenshotDrafts.length" @click="importHoldingScreenshot">确认导入 {{ screenshotDrafts.length }} 项</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="csvDialogOpen" title="核对 CSV 导入内容" width="min(1200px, 96vw)" destroy-on-close>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        :title="`识别结果：${csvPreview?.detected.label || '未识别出画像'}（编码 ${csvPreview?.encoding || '-'}，分隔符 ${csvSeparatorText}）`"
+        description="列映射自动识别；如字段对不上，可在后续版本用映射覆盖重新预览。标“疑似重复”的行默认跳过，勾选后强制导入。"
+      />
+      <el-alert
+        v-for="warning in csvPreview?.warnings || []"
+        :key="warning"
+        class="alert-item"
+        type="warning"
+        :closable="false"
+        :title="warning"
+      />
+      <div class="toolbar import-toolbar">
+        <span class="muted">
+          共 {{ csvPreview?.counts.total ?? 0 }} 行：可导入 {{ csvPreview?.counts.importable ?? 0 }} · 重复
+          {{ csvPreview?.counts.duplicate ?? 0 }} · 疑似重复 {{ csvPreview?.counts.suspect ?? 0 }} · 忽略
+          {{ csvPreview?.counts.ignored ?? 0 }} · 错误 {{ csvPreview?.counts.error ?? 0 }}
+        </span>
+      </div>
+      <el-table :data="csvRows" border max-height="440">
+        <el-table-column label="行" width="60" prop="row_index" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === 'error'" type="danger" effect="plain">错误</el-tag>
+            <el-tag v-else-if="row.status === 'duplicate'" type="info" effect="plain">重复跳过</el-tag>
+            <el-tag v-else-if="row.status === 'suspect'" type="warning" effect="plain">疑似重复</el-tag>
+            <el-tag v-else-if="row.target === 'ignore'" type="info" effect="plain">忽略</el-tag>
+            <el-tag v-else type="success" effect="plain">可导入</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="内容" min-width="320">
+          <template #default="{ row }">{{ rowSummary(row) }}</template>
+        </el-table-column>
+        <el-table-column label="说明" min-width="220">
+          <template #default="{ row }">{{ row.reason || (row.warnings || []).join("；") }}</template>
+        </el-table-column>
+        <el-table-column label="强制导入" width="100">
+          <template #default="{ row }">
+            <el-checkbox v-if="row.status === 'suspect'" v-model="row.force_import" />
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="csvDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="committingImport" :disabled="!csvImportableCount" @click="commitCsvImport">
+          确认导入 {{ csvImportableCount }} 行
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="importResultDialogOpen" title="导入结果与持仓核对" width="min(900px, 96vw)">
+      <p v-if="importResult" class="muted">
+        导入 {{ importResult.counts.imported }} 行 · 重复跳过 {{ importResult.counts.duplicate }} · 忽略
+        {{ importResult.counts.skipped }} · 错误 {{ importResult.counts.error }}
+      </p>
+      <el-table v-if="importResult?.position_effects.length" :data="importResult.position_effects" border stripe>
+        <el-table-column prop="asset_code" label="资产" width="130" />
+        <el-table-column label="持有份额"><template #default="{ row }">{{ row.holding_share ?? "—" }}</template></el-table-column>
+        <el-table-column label="持仓成本"><template #default="{ row }">{{ money(row.holding_amount) }}</template></el-table-column>
+        <el-table-column label="成本价"><template #default="{ row }">{{ row.cost_nav ?? "—" }}</template></el-table-column>
+        <el-table-column label="已实现盈亏"><template #default="{ row }">{{ money(row.realized_pnl_total) }}</template></el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -166,12 +324,54 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "../api/fundpilot";
 import { dateText, money, pct } from "../api/format";
-import type { Asset, HoldingScreenshotDraft, PortfolioBuySimulation, PortfolioDiagnosis, PortfolioOverview, WatchlistItem } from "../api/types";
+import type {
+  AccountPerformance,
+  AccountSummary,
+  Asset,
+  CashEvent,
+  HoldingScreenshotDraft,
+  ImportBatch,
+  ImportCommitResult,
+  ImportPreview,
+  ImportPreviewRow,
+  PortfolioBuySimulation,
+  PortfolioDiagnosis,
+  PortfolioOverview,
+  WatchlistItem,
+} from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import MetricCard from "../components/MetricCard.vue";
 
 const ASSET_LABEL: Record<string, string> = { fund: "基金", stock: "股票", etf: "ETF" };
-const TRADE_LABEL: Record<string, string> = { buy: "买入", sell: "卖出", subscription: "申购", redemption: "赎回", opening: "期初" };
+const TRADE_LABEL: Record<string, string> = {
+  buy: "买入",
+  sell: "卖出",
+  subscription: "申购",
+  redemption: "赎回",
+  opening: "期初",
+  dividend_reinvest: "红利再投",
+  split: "拆分",
+};
+const CASH_EVENT_LABEL: Record<string, string> = {
+  deposit: "入金",
+  withdraw: "出金",
+  dividend: "现金分红",
+  interest: "利息",
+  fee: "费用",
+  adjustment: "调整",
+  opening_balance: "期初现金",
+};
+const IMPORT_STATUS_LABEL: Record<string, string> = {
+  previewed: "待确认",
+  committed: "已入账",
+  partial: "部分入账",
+  failed: "失败",
+};
+const SOURCE_KIND_LABEL: Record<string, string> = {
+  citic_delivery: "中信成交明细",
+  citic_statement: "中信资金流水",
+  unknown: "未识别",
+};
 const loading = ref(false);
 const overview = ref<PortfolioOverview | null>(null);
 const diagnosis = ref<PortfolioDiagnosis | null>(null);
@@ -229,12 +429,114 @@ const pieOption = computed<EChartsOption>(() => ({
   ],
 }));
 
+// —— 账户收益与台账扩展 ——
+const ledgerTab = ref("transactions");
+const account = ref<AccountSummary | null>(null);
+const performance = ref<AccountPerformance | null>(null);
+const cashRows = ref<CashEvent[]>([]);
+const cashForm = reactive({
+  event_type: "deposit",
+  event_date: new Date().toISOString().slice(0, 10),
+  amount: 0,
+  note: "",
+});
+const importBatches = ref<ImportBatch[]>([]);
+const csvDialogOpen = ref(false);
+const previewingImport = ref(false);
+const committingImport = ref(false);
+const csvPreview = ref<ImportPreview | null>(null);
+const csvRows = ref<ImportPreviewRow[]>([]);
+const importResultDialogOpen = ref(false);
+const importResult = ref<ImportCommitResult | null>(null);
+const csvSeparatorText = computed(() => (csvPreview.value?.delimiter === "\t" ? "制表符" : csvPreview.value?.delimiter || "-"));
+const csvImportableCount = computed(
+  () => csvRows.value.filter((row) => row.status === "ok" || (row.status === "suspect" && row.force_import)).length
+);
+const reconciliationWarning = computed(() => {
+  const diff = account.value?.reconciliation_difference;
+  return diff !== null && diff !== undefined && Math.abs(Number(diff)) > 0.01;
+});
+const performanceOption = computed<EChartsOption>(() => ({
+  tooltip: { trigger: "axis" },
+  legend: { data: ["账户总资产", "净投入"] },
+  grid: { left: 60, right: 24, top: 40, bottom: 40 },
+  xAxis: { type: "category", data: performance.value?.points.map((point) => point.point_date) || [] },
+  yAxis: { type: "value" },
+  series: [
+    { name: "账户总资产", type: "line", showSymbol: false, data: performance.value?.points.map((point) => Number(point.total_assets)) || [] },
+    { name: "净投入", type: "line", showSymbol: false, data: performance.value?.points.map((point) => Number(point.net_invested)) || [] },
+  ],
+}));
+
+function rowSummary(row: ImportPreviewRow): string {
+  const parsed = row.parsed;
+  if (!parsed) return Object.values(row.raw || {}).join(" ");
+  const label =
+    row.target === "cash"
+      ? CASH_EVENT_LABEL[String(parsed.event_type)] || String(parsed.event_type)
+      : TRADE_LABEL[String(parsed.trade_type)] || String(parsed.trade_type);
+  const amount = parsed.amount !== undefined && parsed.amount !== null ? ` ${parsed.amount}` : "";
+  return `${parsed.trade_date || parsed.event_date || ""} ${parsed.asset_code || ""} ${label}${amount}`;
+}
+
+async function previewCsvImport(uploadFile: UploadFile) {
+  if (!uploadFile.raw) return;
+  previewingImport.value = true;
+  try {
+    const preview = await api.previewPortfolioImport(uploadFile.raw);
+    csvPreview.value = preview;
+    csvRows.value = preview.rows.map((row) => ({ ...row, force_import: false }));
+    csvDialogOpen.value = true;
+  } finally {
+    previewingImport.value = false;
+  }
+}
+
+async function commitCsvImport() {
+  if (!csvPreview.value) return;
+  committingImport.value = true;
+  try {
+    const rows = csvRows.value.filter((row) => row.status === "ok" || (row.status === "suspect" && row.force_import));
+    importResult.value = await api.commitPortfolioImport(csvPreview.value.batch_id, rows);
+    csvDialogOpen.value = false;
+    importResultDialogOpen.value = true;
+    ElMessage.success(`导入完成：新增 ${importResult.value.counts.imported} 行`);
+    await load();
+  } finally {
+    committingImport.value = false;
+  }
+}
+
+async function addCashEvent() {
+  await api.addCashEvent({ ...cashForm });
+  ElMessage.success("现金事件已添加");
+  cashForm.amount = 0;
+  cashForm.note = "";
+  await load();
+}
+
+async function removeCashEvent(id: number) {
+  await api.deleteCashEvent(id);
+  ElMessage.success("已删除");
+  await load();
+}
+
+async function loadLedgerExtras() {
+  [cashRows.value, importBatches.value, account.value, performance.value] = await Promise.all([
+    api.cashEvents(),
+    api.portfolioImports(20),
+    api.accountSummary(),
+    api.accountPerformance(),
+  ]);
+}
+
 async function load() {
   loading.value = true;
   try {
     [overview.value, transactions.value, diagnosis.value, watchlist.value, assets.value] = await Promise.all([
       api.portfolioOverview(), api.portfolioTransactions() as Promise<Array<Record<string, unknown>>>, api.portfolioDiagnosis() as Promise<PortfolioDiagnosis>, api.watchlist(), api.assets(),
     ]);
+    await loadLedgerExtras();
   } finally { loading.value = false; }
 }
 async function addTransaction() {
@@ -276,7 +578,10 @@ onMounted(load);
 .alert-item { margin-top: 10px; }
 .simulation-grid { margin-top: 10px; }
 .type-select { width: 110px; }
+.type-select-wide { width: 150px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .screenshot-import { margin-bottom: 16px; }
 .import-date { margin: 16px 0 4px; }
+.import-toolbar { margin: 12px 0 8px; }
+.performance-chart { margin-top: 12px; }
 </style>

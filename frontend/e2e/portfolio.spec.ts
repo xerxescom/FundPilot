@@ -37,7 +37,8 @@ function positionRow(page: Page, code: string) {
 }
 
 function transactionRow(page: Page, code: string) {
-  return panel(page, "交易记录").locator("tr.el-table__row", { hasText: code });
+  // 交易记录现在位于「交易记录 / 现金与事件 / 导入批次」标签页中
+  return page.locator("#pane-transactions tr.el-table__row", { hasText: code });
 }
 
 async function fillField(page: Page, label: string, value: string) {
@@ -136,4 +137,45 @@ test("驾驶舱可一键创建今日批次并显示进度", async ({ page }) => 
   // 重复点击返回同一批次（幂等），页面不会出现第二个批次提示
   await panel.getByRole("button", { name: "更新今日数据" }).click();
   await expect(page.locator(".el-message").last()).toContainText("已存在");
+});
+
+test("CSV 导入：预览确认入账，重复导入全部跳过", async ({ page }) => {
+  const csv = [
+    "成交日期,证券代码,证券名称,业务名称,成交价格,成交数量,成交金额,手续费,成交编号",
+    "2026-06-01,600519,贵州茅台,证券买入,1500,10,15000,5,E2E001",
+  ].join("\n");
+
+  await page.goto("/portfolio");
+  await page.locator('input[type="file"][accept*=".csv"]').setInputFiles({
+    name: "delivery.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(csv, "utf-8"),
+  });
+
+  const dialog = page.locator(".el-dialog", { hasText: "核对 CSV 导入内容" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("中信证券成交明细");
+  await expect(dialog).toContainText("共 1 行");
+
+  await dialog.getByRole("button", { name: /确认导入 1 行/ }).click();
+
+  const result = page.locator(".el-dialog", { hasText: "导入结果与持仓核对" });
+  await expect(result).toBeVisible();
+  await expect(result).toContainText("导入 1 行");
+  await expect(result).toContainText("600519");
+  await result.locator(".el-dialog__headerbtn").click();
+
+  // 再次上传同一文件：全部判重，确认按钮禁用
+  await page.locator('input[type="file"][accept*=".csv"]').setInputFiles({
+    name: "delivery.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(csv, "utf-8"),
+  });
+  const again = page.locator(".el-dialog", { hasText: "核对 CSV 导入内容" });
+  await expect(again).toContainText("重复 1");
+  await expect(again.getByRole("button", { name: /确认导入 0 行/ })).toBeDisabled();
+
+  // 账户收益面板渲染正常
+  await again.getByRole("button", { name: "取消" }).click();
+  await expect(panel(page, "账户收益（现金 + 持仓）")).toBeVisible();
 });

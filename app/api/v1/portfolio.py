@@ -1,12 +1,18 @@
+import json
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db.models import PortfolioImportBatch
 from app.db.session import get_db
 from app.schemas.portfolio import (
     CashEventCreateIn,
     CashEventOut,
+    ImportBatchDetailOut,
+    ImportBatchOut,
+    ImportCommitIn,
     PortfolioCreate,
     PortfolioBuySimulationIn,
     HoldingScreenshotImportIn,
@@ -19,7 +25,7 @@ from app.schemas.portfolio import (
     PortfolioTransactionOut,
     PortfolioUpdate,
 )
-from app.services import account_service, correlation_service, portfolio_service
+from app.services import account_service, correlation_service, csv_import_service, portfolio_service
 from app.services.ai.qwen_vision_client import QwenVisionClient
 
 router = APIRouter()
@@ -150,6 +156,69 @@ def delete_position(position_id: int, db: Session = Depends(get_db)):
     if not portfolio_service.delete_position(db, position_id):
         raise HTTPException(status_code=404, detail="Position not found")
     return {"detail": "deleted"}
+
+
+# ---------------------------------------------------------------- CSV 导入
+
+
+@router.post("/imports/preview")
+async def preview_portfolio_import(
+    file: UploadFile = File(...),
+    source_kind: str | None = Form(default=None),
+    mapping_json: str | None = Form(default=None),
+    header_row: int | None = Form(default=None),
+    default_asset_type: str = Form(default="auto"),
+    db: Session = Depends(get_db),
+):
+    content = await file.read()
+    try:
+        await file.close()
+        override = json.loads(mapping_json) if mapping_json else None
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"mapping_json 不是合法 JSON：{exc}") from exc
+    try:
+        return csv_import_service.preview_import(
+            db,
+            file_name=file.filename or "upload.csv",
+            content=content,
+            source_kind=source_kind or None,
+            mapping_override=override,
+            header_row=header_row,
+            default_asset_type=default_asset_type,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/imports/commit")
+def commit_portfolio_import(payload: ImportCommitIn, db: Session = Depends(get_db)):
+    try:
+        return csv_import_service.commit_import(
+            db, batch_id=payload.batch_id, rows=[row.model_dump() for row in payload.rows]
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status = 409 if "已入账" in detail else 404 if "不存在" in detail else 400
+        raise HTTPException(status_code=status, detail=detail) from exc
+
+
+@router.get("/imports", response_model=list[ImportBatchOut])
+def list_portfolio_imports(limit: int = Query(default=20, ge=1, le=100), db: Session = Depends(get_db)):
+    return list(
+        db.scalars(
+            select(PortfolioImportBatch)
+            .order_by(PortfolioImportBatch.created_at.desc(), PortfolioImportBatch.id.desc())
+            .limit(limit)
+        )
+    )
+
+
+@router.get("/imports/{batch_id}", response_model=ImportBatchDetailOut)
+def get_portfolio_import(batch_id: int, db: Session = Depends(get_db)):
+    batch = db.get(PortfolioImportBatch, batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Import batch not found")
+    return batch
 
 
 # ---------------------------------------------------------------- 现金事件

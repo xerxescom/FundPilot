@@ -1,11 +1,18 @@
 import { apiClient, deleteJson, getJson, patchJson, postJson, putJson } from "./client";
 import type {
+  AccountPerformance,
+  AccountSummary,
   Alert,
   AnalyzeResult,
   BatchDetail,
   BatchRetryResult,
+  CashEvent,
   DailyBatchResult,
   DataHealth,
+  ImportBatch,
+  ImportCommitResult,
+  ImportPreview,
+  ImportPreviewRow,
   TaskBatchInfo,
   FundHoldingStock,
   FundNav,
@@ -70,6 +77,28 @@ export const api = {
   portfolioDiagnosis: () => getJson<unknown>("/portfolio/diagnosis"),
   simulatePortfolioBuy: (data: { fund_code: string; amount: number }) =>
     postJson<PortfolioBuySimulation>("/portfolio/simulate-buy", data),
+  previewPortfolioImport: async (
+    file: File,
+    options?: { sourceKind?: string; mappingJson?: string; headerRow?: number; defaultAssetType?: string }
+  ) => {
+    const data = new FormData();
+    data.append("file", file);
+    if (options?.sourceKind) data.append("source_kind", options.sourceKind);
+    if (options?.mappingJson) data.append("mapping_json", options.mappingJson);
+    if (options?.headerRow !== undefined) data.append("header_row", String(options.headerRow));
+    if (options?.defaultAssetType) data.append("default_asset_type", options.defaultAssetType);
+    const response = await apiClient.post<ImportPreview>("/portfolio/imports/preview", data);
+    return response.data;
+  },
+  commitPortfolioImport: (batchId: number, rows: ImportPreviewRow[]) =>
+    postJson<ImportCommitResult>("/portfolio/imports/commit", { batch_id: batchId, rows }),
+  portfolioImports: (limit = 20) => getJson<ImportBatch[]>("/portfolio/imports", { limit }),
+  portfolioImportDetail: (id: number) => getJson<ImportBatch>(`/portfolio/imports/${id}`),
+  cashEvents: (limit = 500) => getJson<CashEvent[]>("/portfolio/cash-events", { limit }),
+  addCashEvent: (data: Record<string, unknown>) => postJson<CashEvent>("/portfolio/cash-events", data),
+  deleteCashEvent: (id: number) => deleteJson(`/portfolio/cash-events/${id}`),
+  accountSummary: () => getJson<AccountSummary>("/portfolio/account/summary"),
+  accountPerformance: () => getJson<AccountPerformance>("/portfolio/account/performance"),
   portfolioTransactions: () => getJson<unknown[]>("/portfolio/transactions"),
   addTransaction: (data: Record<string, unknown>) => postJson<unknown>("/portfolio/transactions", data),
   deleteTransaction: (id: number) => deleteJson(`/portfolio/transactions/${id}`),
