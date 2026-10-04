@@ -55,7 +55,21 @@
       :description="currentStrategy.scenario"
     />
     <div class="section panel">
-      <el-table :data="filtered" border stripe>
+      <ErrorState
+        v-if="loadError"
+        title="评分数据加载失败"
+        :message="loadError"
+        :loading="loading"
+        @retry="loadScores"
+      />
+      <EmptyState
+        v-else-if="!loading && !filtered.length"
+        :description="emptyDescription"
+        action-text="重新加载"
+        :loading="loading"
+        @retry="loadScores"
+      />
+      <el-table v-else :data="filtered" border stripe>
         <el-table-column prop="fund_code" label="基金代码" />
         <el-table-column prop="fund_name" label="基金名称" min-width="180" />
         <el-table-column label="总分"><template #default="{ row }">{{ scoreText(row.total_score) }}</template></el-table-column>
@@ -110,7 +124,7 @@
         <el-table-column prop="reason" label="推荐理由" min-width="280" />
       </el-table>
     </div>
-    <div class="section panel">
+    <div v-if="filtered.length" class="section panel">
       <ChartBox :option="barOption" />
     </div>
   </div>
@@ -121,12 +135,16 @@ import type { EChartsOption } from "echarts";
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 
+import { errorMessage } from "../api/client";
 import { api } from "../api/fundpilot";
 import { scoreText } from "../api/format";
 import type { Score, ScoreStrategy } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
+import EmptyState from "../components/EmptyState.vue";
+import ErrorState from "../components/ErrorState.vue";
 
 const loading = ref(false);
+const loadError = ref<string | null>(null);
 const route = useRoute();
 const rows = ref<Score[]>([]);
 const strategies = ref<ScoreStrategy[]>([]);
@@ -186,12 +204,22 @@ const barOption = computed<EChartsOption>(() => ({
   series: [{ type: "bar", data: filtered.value.slice(0, 20).map((row) => row.total_score || 0) }],
 }));
 
+const emptyDescription = computed(() =>
+  rows.value.length
+    ? "当前筛选条件下没有基金，试试放宽评级 / 信号 / 分数条件"
+    : "暂无评分数据：先到自选池同步净值并计算评分",
+);
+
 async function loadScores() {
   loading.value = true;
+  loadError.value = null;
   try {
-    rows.value = await api.strategyTopScores(selectedStrategy.value);
+    rows.value = await api.strategyTopScores(selectedStrategy.value, 100, { skipErrorToast: true });
     ratings.value = ratingOptions.value;
     applyQueryFilters();
+  } catch (error) {
+    rows.value = [];
+    loadError.value = errorMessage(error);
   } finally {
     loading.value = false;
   }
@@ -318,10 +346,12 @@ function riskLabels(row: Score) {
 onMounted(async () => {
   loading.value = true;
   try {
-    strategies.value = await api.scoreStrategies();
+    strategies.value = await api.scoreStrategies({ skipErrorToast: true });
     if (!strategies.value.some((item) => item.key === selectedStrategy.value)) {
       selectedStrategy.value = strategies.value[0]?.key || "default";
     }
+  } catch (error) {
+    loadError.value = errorMessage(error);
   } finally {
     loading.value = false;
   }

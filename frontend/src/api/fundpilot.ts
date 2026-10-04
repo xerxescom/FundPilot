@@ -1,4 +1,4 @@
-import { apiClient, deleteJson, getJson, patchJson, postJson, putJson } from "./client";
+import { apiClient, deleteJson, getJson, patchJson, postJson, putJson, type RequestOptions } from "./client";
 import type {
   AccountPerformance,
   AccountSummary,
@@ -23,6 +23,7 @@ import type {
   PortfolioOverview,
   HoldingScreenshotImportResult,
   HoldingScreenshotRecognition,
+  ReconcileResult,
   Report,
   Score,
   ScoreSignalSummary,
@@ -39,29 +40,35 @@ export const api = {
     postJson<{ asset: Asset; synced_rows: number }>(`/assets/${code}/sync`, { asset_type: assetType }),
   dashboard: () => getJson<unknown>("/dashboard/overview"),
   dashboardToday: () => getJson<unknown>("/dashboard/today"),
-  watchlist: () => getJson<WatchlistItem[]>("/watchlist"),
+  watchlist: (options?: RequestOptions) => getJson<WatchlistItem[]>("/watchlist", undefined, options),
   addWatchlist: (data: Record<string, unknown>) => postJson<WatchlistItem>("/watchlist", data),
   removeWatchlist: (code: string) => deleteJson(`/watchlist/${code}`),
   syncWatchlistNav: () => postJson<Record<string, SyncDiagnostics>>("/watchlist/sync-nav"),
   syncFundNav: (code: string) => postJson<SyncDiagnostics>(`/funds/${code}/sync-nav`),
   analyzeFund: (code: string, generateReport = false) =>
     postJson<AnalyzeResult>(`/funds/${code}/analyze`, undefined, { generate_report: generateReport }),
-  analysisStatus: (code: string) => getJson<unknown>(`/funds/${code}/analysis-status`),
-  nav: (code: string) => getJson<FundNav[]>(`/funds/${code}/nav`),
-  holdingStocks: (code: string) => getJson<FundHoldingStock[]>(`/funds/${code}/holdings/stocks`),
+  analysisStatus: (code: string, options?: RequestOptions) =>
+    getJson<unknown>(`/funds/${code}/analysis-status`, undefined, options),
+  nav: (code: string, options?: RequestOptions) => getJson<FundNav[]>(`/funds/${code}/nav`, undefined, options),
+  holdingStocks: (code: string, options?: RequestOptions) =>
+    getJson<FundHoldingStock[]>(`/funds/${code}/holdings/stocks`, undefined, options),
   syncHoldingStocks: (code: string) => postJson<{ fund_code: string; synced_rows: number }>(`/funds/${code}/holdings/stocks/sync`),
   calcIndicators: (code: string) => postJson<Indicator>(`/funds/${code}/calc-indicators`),
-  indicators: (code: string) => getJson<Indicator>(`/funds/${code}/indicators`),
+  indicators: (code: string, options?: RequestOptions) =>
+    getJson<Indicator>(`/funds/${code}/indicators`, undefined, options),
   calcScore: (code: string) => postJson<Score>(`/funds/${code}/calc-score`),
-  score: (code: string) => getJson<Score>(`/funds/${code}/score`),
+  score: (code: string, options?: RequestOptions) => getJson<Score>(`/funds/${code}/score`, undefined, options),
   topScores: (limit = 100) => getJson<Score[]>("/recommendations/top", { limit }),
-  scoreStrategies: () => getJson<ScoreStrategy[]>("/scores/strategies"),
+  scoreStrategies: (options?: RequestOptions) => getJson<ScoreStrategy[]>("/scores/strategies", undefined, options),
   scoreSummary: () => getJson<ScoreSignalSummary>("/scores/summary"),
-  strategyTopScores: (strategy = "default", limit = 100) => getJson<Score[]>("/scores/top", { strategy, limit }),
-  scoreTrend: (code: string) => getJson<ScoreTrendRow[]>(`/scores/trend/${code}`),
-  dataHealth: () => getJson<DataHealth>("/data/health"),
-  reconcile: (code: string) => getJson<unknown>(`/data/reconcile/${code}`),
-  market: () => getJson<MarketContext[]>("/market/context"),
+  strategyTopScores: (strategy = "default", limit = 100, options?: RequestOptions) =>
+    getJson<Score[]>("/scores/top", { strategy, limit }, options),
+  scoreTrend: (code: string, options?: RequestOptions) =>
+    getJson<ScoreTrendRow[]>(`/scores/trend/${code}`, undefined, options),
+  dataHealth: (options?: RequestOptions) => getJson<DataHealth>("/data/health", undefined, options),
+  reconcile: (code: string, options?: RequestOptions) =>
+    getJson<ReconcileResult>(`/data/reconcile/${code}`, undefined, options),
+  market: (options?: RequestOptions) => getJson<MarketContext[]>("/market/context", undefined, options),
   syncMarket: () => postJson<unknown>("/market/sync"),
   alerts: () => getJson<Alert[]>("/alerts/unread"),
   generateAlerts: () => postJson<Alert[]>("/alerts/generate"),
@@ -108,8 +115,10 @@ export const api = {
   addPosition: (data: Record<string, unknown>) => postJson<unknown>("/portfolio", data),
   updatePosition: (id: number, data: Record<string, unknown>) => putJson<unknown>(`/portfolio/${id}`, data),
   deletePosition: (id: number) => deleteJson(`/portfolio/${id}`),
-  compareFunds: (codes: string[]) => getJson<unknown>("/funds/compare", { codes: codes.join(",") }),
-  industryOverview: () => getJson<unknown[]>("/research/industry-overview"),
+  compareFunds: (codes: string[], options?: RequestOptions) =>
+    getJson<unknown>("/funds/compare", { codes: codes.join(",") }, options),
+  industryOverview: (options?: RequestOptions) =>
+    getJson<unknown[]>("/research/industry-overview", undefined, options),
   riskReturn: () => getJson<unknown[]>("/research/risk-return"),
   correlationMatrix: () => getJson<unknown>("/correlation/matrix"),
   correlationPairs: () => getJson<unknown[]>("/correlation/pairs"),
@@ -118,7 +127,8 @@ export const api = {
   generateCorrelationAlerts: () => postJson<Alert[]>("/correlation/alerts"),
   generateDailyReport: () => postJson<Report>("/reports/daily"),
   generateFundReport: (code: string) => postJson<Report>(`/reports/fund/${code}`),
-  latestFundReport: (code: string) => getJson<Report | null>(`/reports/fund/${code}`),
+  latestFundReport: (code: string, options?: RequestOptions) =>
+    getJson<Report | null>(`/reports/fund/${code}`, undefined, options),
   latestReport: () => getJson<Report>("/reports/latest"),
   reportHistory: (limit = 50) => getJson<Report[]>("/reports/history", { limit }),
   ollamaStatus: () => getJson<unknown>("/reports/ollama/status"),

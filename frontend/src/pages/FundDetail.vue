@@ -17,7 +17,25 @@
 
     <PageSkeleton v-if="loading && !hasLoadedOnce" class="section" />
 
+    <ErrorState
+      v-else-if="bodyError"
+      class="section"
+      title="基金数据加载失败"
+      :message="bodyError"
+      :loading="loading"
+      @retry="loadFund"
+    />
+
     <div v-else-if="fundCode" v-loading="loading || busy" :element-loading-text="loadingText" class="fund-detail-body">
+      <el-alert
+        v-if="loadErrors.length"
+        class="section"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="部分板块加载失败（其余内容仍可查看）"
+        :description="loadErrors.join('；')"
+      />
       <div v-if="status" class="section detail-hero">
         <div class="hero-main">
           <div>
@@ -284,11 +302,13 @@ import type { EChartsOption } from "echarts";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
+import { errorMessage, isNotFound } from "../api/client";
 import { api } from "../api/fundpilot";
 import { dateText, pct, scoreText } from "../api/format";
 import type { AnalysisStatus, FundHoldingStock, FundNav, Indicator, Report, Score, SyncDiagnostics, WatchlistItem } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import ChartSkeleton from "../components/ChartSkeleton.vue";
+import ErrorState from "../components/ErrorState.vue";
 import FundSelector from "../components/FundSelector.vue";
 import MetricCard from "../components/MetricCard.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
@@ -302,6 +322,8 @@ const selected = ref<string>();
 const manualCode = ref("");
 const loading = ref(false);
 const hasLoadedOnce = ref(false);
+const loadErrors = ref<string[]>([]);
+const bodyError = ref<string | null>(null);
 const actionLoading = ref<ActionLoading>(null);
 const navRows = ref<FundNav[]>([]);
 const holdingStocks = ref<FundHoldingStock[]>([]);
@@ -401,18 +423,51 @@ async function loadBase() {
   selected.value = routeFundCode.value || selected.value || watchlist.value[0]?.fund_code;
 }
 
+/** 可选板块：404（尚未分析）是正常状态；其他失败记录下来，由页面提示可重试。 */
+async function loadOptional<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    if (!isNotFound(error)) {
+      loadErrors.value.push(`${label}：${errorMessage(error)}`);
+    }
+    return fallback;
+  }
+}
+
 async function loadFund() {
   if (!fundCode.value) return;
   loading.value = true;
+  loadErrors.value = [];
+  bodyError.value = null;
   try {
-    status.value = (await api.analysisStatus(fundCode.value).catch(() => null)) as AnalysisStatus | null;
-    navRows.value = await api.nav(fundCode.value);
-    holdingStocks.value = await api.holdingStocks(fundCode.value).catch(() => []);
+    status.value = (await loadOptional(
+      "分析状态",
+      () => api.analysisStatus(fundCode.value as string, { skipErrorToast: true }),
+      null,
+    )) as AnalysisStatus | null;
+    // 净值是主体内容：失败时展示整页错误态与重试
+    navRows.value = await api.nav(fundCode.value, { skipErrorToast: true });
     navPage.value = 1;
-    indicator.value = await api.indicators(fundCode.value).catch(() => null);
-    score.value = await api.score(fundCode.value).catch(() => null);
-    fundReport.value = await api.latestFundReport(fundCode.value);
+    holdingStocks.value = await loadOptional("重仓股", () => api.holdingStocks(fundCode.value as string, { skipErrorToast: true }), []);
+    indicator.value = (await loadOptional(
+      "指标",
+      () => api.indicators(fundCode.value as string, { skipErrorToast: true }),
+      null,
+    )) as Indicator | null;
+    score.value = (await loadOptional(
+      "评分",
+      () => api.score(fundCode.value as string, { skipErrorToast: true }),
+      null,
+    )) as Score | null;
+    fundReport.value = await loadOptional(
+      "基金解释",
+      () => api.latestFundReport(fundCode.value as string, { skipErrorToast: true }),
+      null,
+    );
     hasLoadedOnce.value = true;
+  } catch (error) {
+    bodyError.value = errorMessage(error);
   } finally {
     loading.value = false;
   }
