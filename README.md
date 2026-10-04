@@ -58,6 +58,12 @@ uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
+批次 worker（"更新今日数据"的执行进程，单独终端常驻；`--once` 只处理一个步骤项）：
+
+```bash
+uv run python -m app.worker
+```
+
 启动 Vue 前端：
 
 ```bash
@@ -69,6 +75,7 @@ npm run dev
 访问地址：
 
 - FastAPI: http://127.0.0.1:8000
+- 存活/就绪探针: http://127.0.0.1:8000/livez、http://127.0.0.1:8000/readyz（就绪探针会核对数据库迁移版本）
 - API docs: http://127.0.0.1:8000/docs
 - Vue: http://127.0.0.1:5173
 
@@ -125,12 +132,31 @@ set FUNDPILOT_TEST_POSTGRES_URL=postgresql+psycopg2://postgres:postgres@localhos
 
 ## 升级与发布
 
-1. 备份数据库，例如 `docker exec fundpilot_postgres pg_dump -U postgres fund_watcher > fund_watcher_backup.sql`。
+本地/服务器（uv 流程）：
+
+1. 备份数据库：`.venv\Scripts\python scripts\backup_database.py`（输出到 `backups/`，含 SHA256）。
 2. 安装依赖：`uv sync --frozen`；前端 `npm ci`。
 3. 前端构建：`cd frontend && npm run build`（产物在 `frontend/dist/`）。
-4. 执行迁移（与服务启动分开）：`alembic upgrade head`。
-5. 启动后端与前端；开发环境 `AUTO_CREATE_TABLES=true` 会自动补附加列，正式环境应关闭并由步骤 4 负责。
+4. 执行迁移（与服务启动分开）：`alembic upgrade head`；`GET /readyz` 会核对数据库版本是否为 head。
+5. 启动后端、worker（`python -m app.worker`）与前端；开发环境 `AUTO_CREATE_TABLES=true` 会自动补附加列，正式环境应关闭并由步骤 4 负责。
 6. 存量手工/截图持仓如需变成显式期初账本事件：先 `python scripts/backfill_opening_holdings.py` 预览，确认后 `--apply --yes`。
+
+Docker Compose（postgres → migrate → backend/worker → frontend，端口默认只绑定 127.0.0.1）：
+
+```bash
+copy .env.docker.example .env.docker     # 填写密钥
+docker compose --env-file .env.docker up -d --build
+docker compose --env-file .env.docker logs worker --tail 20
+```
+
+## 备份与恢复演练
+
+```bash
+python scripts/backup_database.py                                   # 备份（Docker 内的 pg_dump）
+python scripts/restore_database.py backups/fund_watcher_<时间戳>.dump   # 默认恢复到 <库名>_restore_test 并核对
+```
+
+恢复脚本默认**不会**覆盖当前库；会逐项核对关键表行数与持仓份额/成本合计，输出对平表并以退出码表示结果（`--keep-target` 可保留恢复库人工检查）。建议在每次升级前做一次演练并记录核对结果。
 
 ## 产品边界
 

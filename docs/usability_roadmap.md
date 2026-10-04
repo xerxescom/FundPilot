@@ -206,4 +206,18 @@ AI 验收样本至少覆盖：缺行情、过期行情、正常比较、评分�
 - 任务 7：新增 `scripts/verify_migrations.py`（临时库上自动验证全新库建库、旧库升级、降级/重升级幂等，13 项检查）；新增 `tests/test_postgres_integration.py`（`postgres` 标记，默认跳过，覆盖迁移后的账本原子性、期初衔接与结构化任务结果）；新增 `.github/workflows/ci.yml`（后端测试与 ruff、前端构建、PostgreSQL 迁移矩阵、浏览器端到端测试）；新增 Playwright 端到端测试（`npm run test:e2e`）覆盖录入交易/失败提示/刷新一致与估值完整性提示；README 补充开发校验与升级发布步骤。
 - 验证：后端 100 项测试通过（含约 24 项新增回归，PostgreSQL 模块默认跳过）；`ruff` 通过；前端 `npm run typecheck`、`npm run build` 与 `npm run test:e2e`（3 项浏览器流程）通过；Alembic 0007 在 Docker PostgreSQL 上验证旧库升级、全新库创建、降级/重升级幂等；回填脚本 dry-run 零写入、apply 核对通过；API 冒烟覆盖“1000+100=1100”、超卖 400 回滚、删除 400 回滚、编辑守卫与诊断契约。
 
-未完成与已知限制：唯一约束 `(asset_type, asset_code)` 待存量去重后再加；已实现盈亏/现金账本、真实账户回撤、股票复权口径标记、任务持久化 worker 仍属后续阶段；CI 尚未在 GitHub 远端实际运行过（本地已验证各步骤可执行）。
+未完成与已知限制：唯一约束 `(asset_type, asset_code)` 待存量去重后再加；已实现盈亏/现金账本、真实账户回撤、股票复权口径标记仍属后续阶段；CI 尚未在 GitHub 远端实际运行过（本地已验证各步骤可执行）。
+
+## 8. 阶段 B 实施进度（2026-10-04）
+
+阶段 B「每天可靠更新并可部署」的核心与部署备份部分已完成（按用户确认的范围，不含登录鉴权与 HTTPS）。
+
+- 批次内核：新增 `task_batch` / `task_batch_item`（Alembic `0008_task_batch`）。`POST /api/v1/tasks/batches/daily` 按 `daily_update:{交易日}` 幂等创建，覆盖自选与持仓的基金/股票/ETF；步骤按 行情及市场背景 → 数据质量 → 指标 → 评分 → 预警 → 报告 依赖推进，报告严格在预警之后；单资产失败只阻断自身下游（下游标记 `skipped` 并记录 `blocked_by`），全局步骤在部分数据上继续并把覆盖情况写入 `coverage_json` 与报告。
+- 状态与恢复：状态含 排队/运行/成功/失败/跳过/暂未发布/中断；worker（`python -m app.worker`，compose 中为独立服务）用条件 UPDATE 领取步骤项，15 秒心跳、120 秒租约；租约过期即被识别为中断并对外显示，短暂可见后自动重排，超重试上限或超恢复窗口判失败；重复点击返回同一批次并对"暂未发布/可恢复中断"项补跑，单资产可用 `POST /tasks/batches/{id}/retry` 重试。
+- 交易日历：`trade_calendar` 缓存 akshare 开市日历（离线回退周末规则）；`latest_expected_trade_date` 在收盘时间前回退上一开市日；基金 3 个开市日、股票/ETF 1 个开市日宽限内视为"暂未发布"（不算失败），抓取异常才是 `source_error` 真正失败。实测 2026-10-04（周日、国庆假期）批次正确落在 2026-09-30。
+- 数据健康与报告：健康页优先读取批次同步项（成功/失败/暂未发布/中断分别显示与提示）；日报与批次一一对应（`ai_report.batch_id` 唯一约束），同一批次不会重复生成；报告文本包含数据覆盖说明；批次内产生的任务日志通过 contextvar 自动关联 `task_run_log.batch_id`。
+- 部署：Dockerfile 改为 uv + `uv.lock` 冻结安装（可选镜像源构建参数），新增 `.dockerignore`；前端改为多阶段构建 + nginx 托管静态产物并反代 `/api`；compose 增加一次性 `migrate` 服务与独立 `worker` 服务，`AUTO_CREATE_TABLES=false`，所有对外端口只绑定 127.0.0.1，`.env.docker` 经 `env_file` 完整透传（含 DeepSeek/Qwen 密钥，仅后端持有）；新增 `/livez`（纯存活）与 `/readyz`（数据库可连且迁移版本等于 head，否则 503）。
+- 备份恢复：`scripts/backup_database.py`（pg_dump custom 格式 + SHA256）与 `scripts/restore_database.py`（默认恢复到独立测试库、逐项核对行数与持仓份额/成本合计、默认拒绝覆盖当前库）；README 与 docs 补充操作流程。
+- 验证：后端 145 项测试通过（新增批次/执行器/worker/日历/接口/健康约 40 项）与 PostgreSQL 集成测试 7 项；ruff、前端 typecheck/build、Playwright 4 条流程（含驾驶舱一键创建批次与幂等）通过；迁移矩阵 28 项检查通过；用真实 akshare 数据完整跑通一次批次（market→alerts→report，状态 success，覆盖率与报告落库正确）；备份恢复演练逐项对平（51,427 条净值、110 条评分、75 份报告、持仓合计一致）；`/livez` 与 `/readyz`（未迁移 503、已迁移 head 200、数据库停机 503 而存活保持 200）验证通过。
+- 部署栈实测（Docker Compose，临时库）：`postgres → migrate（全新库一路升到 0008，退出码 0）→ backend（`AUTO_CREATE_TABLES=false`，schema 完全来自迁移）→ worker / nginx 前端`，全部 healthy；经 nginx 反代创建批次并观察 worker 消费完成；**杀掉 worker → 租约过期后批次显示"中断"（无 worker 存活也能识别）→ 重启 worker 自动重排并恢复成功（market 步骤 retry=1）**；重复点击返回同一批次。
+- 已知限制：本机网络对 docker.io 拉取基础镜像严重限速（可用 `.env.docker` 的 `DOCKER_UV_INDEX_URL`/`DOCKER_NPM_REGISTRY` 或从镜像仓库预拉基础镜像；Docker 内容缓存卡住半截层时重启引擎可解）；登录鉴权与 HTTPS 未做（端口已收回环，远程访问留待下一阶段）；多 worker 并行调优、单资产超时看门狗、报告版本 supersedes 未做。

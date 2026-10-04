@@ -1,3 +1,14 @@
+# 使用方式：
+#   copy .env.docker.example .env.docker   （填写密钥后）
+#   docker compose --env-file .env.docker up -d --build
+# 启动顺序：postgres（健康）→ migrate（一次性迁移）→ backend / worker → frontend
+# 所有对外端口默认只绑定回环地址 127.0.0.1，不暴露到局域网。
+# 网络受限时可在 .env.docker 设置 DOCKER_UV_INDEX_URL 使用镜像源加速依赖安装。
+x-backend-build: &backend-build
+  context: .
+  args:
+    UV_INDEX_URL: ${DOCKER_UV_INDEX_URL:-}
+
 services:
   postgres:
     image: postgres:16
@@ -7,7 +18,7 @@ services:
       POSTGRES_USER: ${DOCKER_POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${DOCKER_POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${DOCKER_POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${DOCKER_POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -16,47 +27,72 @@ services:
       timeout: 5s
       retries: 5
 
-  backend:
-    build: .
-    command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+  # 一次性迁移服务：与服务启动分离，backend/worker 等它成功后再启动
+  migrate:
+    build: *backend-build
+    command: ["alembic", "upgrade", "head"]
+    env_file:
+      - path: .env.docker
+        required: false
+    environment:
+      APP_ENV: docker
+      DATABASE_URL: postgresql+psycopg2://${DOCKER_POSTGRES_USER:-postgres}:${DOCKER_POSTGRES_PASSWORD:-postgres}@postgres:5432/${DOCKER_POSTGRES_DB:-fund_watcher}
     depends_on:
       postgres:
         condition: service_healthy
-    ports:
-      - "${DOCKER_BACKEND_PORT:-8000}:8000"
+
+  backend:
+    build: *backend-build
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - path: .env.docker
+        required: false
     environment:
-      APP_NAME: FundPilot
       APP_ENV: docker
-      BACKEND_PORT: 8000
       DATABASE_URL: postgresql+psycopg2://${DOCKER_POSTGRES_USER:-postgres}:${DOCKER_POSTGRES_PASSWORD:-postgres}@postgres:5432/${DOCKER_POSTGRES_DB:-fund_watcher}
-      SYNC_NAV_CRON: ${DOCKER_SYNC_NAV_CRON:-18:00}
+      AUTO_CREATE_TABLES: "false"
       ENABLE_SCHEDULER: ${DOCKER_ENABLE_SCHEDULER:-false}
-      AUTO_CREATE_TABLES: ${DOCKER_AUTO_CREATE_TABLES:-true}
-      AI_PROVIDER: ${DOCKER_AI_PROVIDER:-ollama}
+      SYNC_NAV_CRON: ${DOCKER_SYNC_NAV_CRON:-18:00}
       OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${DOCKER_OLLAMA_MODEL:-qwen3:14b}
-      OLLAMA_TIMEOUT: ${DOCKER_OLLAMA_TIMEOUT:-180}
-      ONLINE_LLM_API_KEY: ${DOCKER_ONLINE_LLM_API_KEY:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${DOCKER_BACKEND_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/livez', timeout=3)\""]
       interval: 15s
       timeout: 5s
       retries: 5
 
+  # 独立批次 worker：消费每日更新批次，带租约与心跳
+  worker:
+    build: *backend-build
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - path: .env.docker
+        required: false
+    environment:
+      APP_ENV: docker
+      DATABASE_URL: postgresql+psycopg2://${DOCKER_POSTGRES_USER:-postgres}:${DOCKER_POSTGRES_PASSWORD:-postgres}@postgres:5432/${DOCKER_POSTGRES_DB:-fund_watcher}
+      AUTO_CREATE_TABLES: "false"
+      OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # 前端静态构建产物由 nginx 托管，并反代 /api 到 backend
   frontend:
-    image: node:20-alpine
-    working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    build:
+      context: ./frontend
+      args:
+        NPM_REGISTRY: ${DOCKER_NPM_REGISTRY:-}
     depends_on:
       backend:
         condition: service_healthy
     ports:
-      - "${DOCKER_FRONTEND_PORT:-5173}:5173"
-    volumes:
-      - ./frontend:/app
-    environment:
-      FRONTEND_PORT: 5173
-      VITE_API_PROXY_TARGET: http://backend:8000
+      - "127.0.0.1:${DOCKER_FRONTEND_PORT:-5173}:80"
 
 volumes:
   postgres_data:
