@@ -1,4 +1,4 @@
-FROM node:20-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 
 # 可选：网络受限时用镜像源加速 npm 安装，例如 https://registry.npmmirror.com
