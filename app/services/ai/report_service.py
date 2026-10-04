@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -59,6 +60,11 @@ def _fallback_report(data: dict) -> str:
             f"组合当前市值：{portfolio.get('total_value')}，"
             f"收益率：{portfolio.get('profit_rate')}。\n\n"
         )
+    coverage = data.get("batch_coverage") or {}
+    coverage_notes = coverage.get("notes") or []
+    coverage_line = (
+        "数据覆盖\n" + "；".join(str(note) for note in coverage_notes) + "\n\n" if coverage_notes else ""
+    )
     return (
         "今日概况\n"
         "系统已基于本地净值、指标和评分数据生成规则摘要。\n"
@@ -67,6 +73,7 @@ def _fallback_report(data: dict) -> str:
         f"{chr(10).join(market_lines) if market_lines else '暂无市场指数数据。'}\n\n"
         "组合表现\n"
         f"{portfolio_line}"
+        f"{coverage_line}"
         "自选基金表现\n"
         f"当前自选基金数量：{data.get('watchlist_count', 0)}，"
         f"已有评分数量：{data.get('score_count', 0)}。\n\n"
@@ -165,8 +172,23 @@ def collect_daily_report_data(db: Session) -> dict:
     }
 
 
-def generate_daily_report(db: Session) -> AIReport:
+def generate_daily_report(
+    db: Session,
+    *,
+    batch_id: int | None = None,
+    trade_date: date | None = None,
+    coverage: dict | None = None,
+) -> AIReport:
+    """生成每日简报；批次内幂等——同一 batch_id 已存在日报时直接复用。"""
+    if batch_id is not None:
+        existing = db.scalar(
+            select(AIReport).where(AIReport.report_type == "daily", AIReport.batch_id == batch_id)
+        )
+        if existing is not None:
+            return existing
     data = collect_daily_report_data(db)
+    if coverage is not None:
+        data["batch_coverage"] = coverage
     prompt = DAILY_REPORT_PROMPT.format(fund_data=data)
     model_name = get_settings().ollama_model
     is_fallback = False
@@ -195,6 +217,8 @@ def generate_daily_report(db: Session) -> AIReport:
     report = AIReport(
         report_type="daily",
         title="每日基金简报",
+        batch_id=batch_id,
+        trade_date=trade_date,
         content=_sanitize(content),
         model_name=model_name,
         is_fallback=is_fallback,

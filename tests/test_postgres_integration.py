@@ -14,13 +14,14 @@ import os
 import subprocess
 import sys
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -83,8 +84,73 @@ def _position_by_code(overview: dict, asset_code: str) -> dict:
 
 
 def test_schema_comes_from_migrations(pg_session):
-    columns = {item["name"] for item in inspect(pg_session.bind).get_columns("task_run_log")}
+    inspector = inspect(pg_session.bind)
+    columns = {item["name"] for item in inspector.get_columns("task_run_log")}
     assert "result_json" in columns
+    assert "batch_id" in columns
+    tables = set(inspector.get_table_names())
+    assert {"task_batch", "task_batch_item", "trade_calendar"} <= tables
+    report_columns = {item["name"] for item in inspector.get_columns("ai_report")}
+    assert {"batch_id", "trade_date"} <= report_columns
+
+
+def test_concurrent_item_claim_only_one_wins(pg_session_factory, pg_session):
+    from app.db.models import TaskBatchItem
+    from app.services import batch_worker_service, daily_batch_service
+
+    batch, _ = daily_batch_service.create_or_get_daily_batch(pg_session, trade_date=date(2026, 10, 10))
+    item = pg_session.scalar(
+        select(TaskBatchItem).where(TaskBatchItem.batch_id == batch.id, TaskBatchItem.step == "market")
+    )
+    now = datetime(2026, 10, 10, 18, 0)
+
+    with pg_session_factory() as other_session:
+        first = batch_worker_service.claim_item(pg_session, item.id, "worker-a", now)
+        second = batch_worker_service.claim_item(other_session, item.id, "worker-b", now)
+
+    assert first is True
+    assert second is False
+    # 释放领取，避免过期租约影响后续用例
+    item.status = "queued"
+    item.lease_owner = None
+    item.lease_expires_at = None
+    pg_session.commit()
+
+
+def test_duplicate_daily_report_for_same_batch_is_rejected(pg_session):
+    from app.db.models import AIReport
+
+    pg_session.add(AIReport(report_type="daily", batch_id=999001, content="第一版"))
+    pg_session.commit()
+    pg_session.add(AIReport(report_type="daily", batch_id=999001, content="重复版本"))
+
+    with pytest.raises(IntegrityError):
+        pg_session.commit()
+    pg_session.rollback()
+
+
+def test_expired_lease_recovery_across_sessions(pg_session_factory, pg_session):
+    from app.db.models import TaskBatchItem
+    from app.services import batch_worker_service, daily_batch_service
+
+    batch, _ = daily_batch_service.create_or_get_daily_batch(pg_session, trade_date=date(2026, 10, 11))
+    item = pg_session.scalar(
+        select(TaskBatchItem).where(TaskBatchItem.batch_id == batch.id, TaskBatchItem.step == "market")
+    )
+    now = datetime(2026, 10, 11, 18, 0)
+    item.status = "running"
+    item.lease_owner = "dead-worker"
+    item.lease_expires_at = now - timedelta(seconds=30)
+    pg_session.commit()
+
+    with pg_session_factory() as other_session:
+        recovered = batch_worker_service.recover_expired_leases(other_session, now)
+
+    assert recovered == {"interrupted": 1}
+    pg_session.expire_all()
+    refreshed = pg_session.get(TaskBatchItem, item.id)
+    assert refreshed.status == "interrupted"
+    assert refreshed.error_class == "lease_expired"
 
 
 def test_manual_position_plus_buy_keeps_shares_on_postgres(pg_session):

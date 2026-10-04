@@ -1,8 +1,41 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from app.db.models import AIReport, FundIndicator, FundNav, FundScore, TaskRunLog, Watchlist
+from app.db.models import (
+    AIReport,
+    FundIndicator,
+    FundNav,
+    FundScore,
+    TaskBatch,
+    TaskBatchItem,
+    TaskRunLog,
+    Watchlist,
+)
 from app.services.data_health_service import data_health_overview, fund_data_health
+
+
+def _add_batch_sync_item(db_session, status: str, error_message: str | None = None) -> None:
+    batch = TaskBatch(
+        batch_type="daily_update",
+        idempotency_key="daily_update:2026-05-24",
+        status="partial_success",
+        trade_date=date(2026, 5, 24),
+    )
+    db_session.add(batch)
+    db_session.flush()
+    db_session.add(
+        TaskBatchItem(
+            batch_id=batch.id,
+            step="sync_nav",
+            asset_type="fund",
+            asset_code="000001",
+            status=status,
+            error_message=error_message,
+            idempotency_key="daily_update:2026-05-24:sync_nav:fund:000001",
+            finished_at=datetime(2026, 5, 24, 18, 0),
+        )
+    )
+    db_session.commit()
 
 
 def test_data_health_detects_stale_missing_return_and_pending_indicator(db_session):
@@ -142,6 +175,68 @@ def test_sync_status_prefers_result_json_over_truncated_message(db_session):
     health = fund_data_health(db_session, "000001", today=date(2026, 5, 25))
 
     assert health["latest_sync_status"] == "success"
+
+
+def test_health_reads_pending_batch_item_as_not_published(db_session):
+    db_session.add(Watchlist(fund_code="000001", fund_name="测试基金", is_active=True))
+    db_session.add(
+        FundNav(
+            fund_code="000001",
+            nav_date=date(2026, 5, 24),
+            unit_nav=Decimal("1.0"),
+            daily_return=Decimal("0.010000"),
+        )
+    )
+    db_session.commit()
+    _add_batch_sync_item(db_session, "pending")
+
+    health = fund_data_health(db_session, "000001", today=date(2026, 5, 25))
+
+    assert health["latest_sync_status"] == "pending"
+    assert health["latest_sync_date"] == date(2026, 5, 24)
+    assert any("暂未发布" in issue for issue in health["issues"])
+    assert health["status"] == "正常"  # 暂未发布不是失败，不改变健康状态
+
+
+def test_health_reads_failed_batch_item_and_marks_attention(db_session):
+    db_session.add(Watchlist(fund_code="000001", fund_name="测试基金", is_active=True))
+    db_session.add(
+        FundNav(
+            fund_code="000001",
+            nav_date=date(2026, 5, 24),
+            unit_nav=Decimal("1.0"),
+            daily_return=Decimal("0.010000"),
+        )
+    )
+    db_session.commit()
+    _add_batch_sync_item(db_session, "failed", error_message="全部数据源同步失败")
+
+    health = fund_data_health(db_session, "000001", today=date(2026, 5, 25))
+
+    assert health["latest_sync_status"] == "failed"
+    assert health["latest_failure_reason"] == "全部数据源同步失败"
+    assert health["status"] == "需关注"
+    assert any("同步失败" in issue for issue in health["issues"])
+
+
+def test_health_reads_interrupted_batch_item_as_recoverable(db_session):
+    db_session.add(Watchlist(fund_code="000001", fund_name="测试基金", is_active=True))
+    db_session.add(
+        FundNav(
+            fund_code="000001",
+            nav_date=date(2026, 5, 24),
+            unit_nav=Decimal("1.0"),
+            daily_return=Decimal("0.010000"),
+        )
+    )
+    db_session.commit()
+    _add_batch_sync_item(db_session, "interrupted", error_message="worker 中断，租约已过期，等待恢复")
+
+    health = fund_data_health(db_session, "000001", today=date(2026, 5, 25))
+
+    assert health["latest_sync_status"] == "interrupted"
+    assert health["status"] == "需关注"
+    assert any("中断" in issue for issue in health["issues"])
 
 
 def test_sync_status_legacy_message_fallback_still_works(db_session):

@@ -48,7 +48,9 @@ def init_db() -> None:
         market,
         portfolio,
         score,
+        task_batch,
         task_log,
+        trade_calendar,
         watchlist,
     )
 
@@ -84,6 +86,8 @@ def ensure_schema_compatibility() -> None:
                 "is_fallback": "BOOLEAN DEFAULT FALSE",
                 "fallback_reason": "TEXT",
                 "input_snapshot": "TEXT",
+                "batch_id": "INTEGER",
+                "trade_date": "DATE",
             },
         },
         "alert_event": {
@@ -110,6 +114,7 @@ def ensure_schema_compatibility() -> None:
             "columns": columns_for("task_run_log"),
             "missing": {
                 "result_json": "JSON",
+                "batch_id": "INTEGER",
             },
         },
     }

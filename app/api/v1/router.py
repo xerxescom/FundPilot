@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     asset,
     alert,
+    batch,
     correlation,
     dashboard,
     data,
@@ -30,4 +31,5 @@ api_router.include_router(research.router, prefix="/research", tags=["research"]
 api_router.include_router(correlation.router, prefix="/correlation", tags=["correlation"])
 api_router.include_router(score.router, prefix="/scores", tags=["scores"])
 api_router.include_router(task.router, prefix="/tasks", tags=["tasks"])
+api_router.include_router(batch.router, prefix="/tasks", tags=["tasks"])
 api_router.include_router(fund.recommendation_router, prefix="/recommendations", tags=["recommendations"])

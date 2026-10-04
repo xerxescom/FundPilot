@@ -26,6 +26,8 @@ function statusText(value: unknown): string {
   if (value === "failed") return "失败";
   if (value === "partial_success") return "部分成功";
   if (value === "skipped") return "已跳过";
+  if (value === "pending") return "暂未发布";
+  if (value === "interrupted") return "中断";
   if (value === "queued") return "排队中";
   if (value === "running") return "执行中";
   if (value === "success") return "成功";

@@ -33,6 +33,43 @@
     </div>
 
     <div class="section panel">
+      <div class="section-heading">
+        <div>
+          <h2 class="section-title">今日数据更新</h2>
+          <p class="muted">
+            <template v-if="!batch">一键同步自选与持仓的行情、指标、评分、预警并生成报告。</template>
+            <template v-else>
+              批次 #{{ batch.id }} · 交易日 {{ batch.trade_date || "-" }} ·
+              {{ BATCH_STATUS_LABEL[batch.effective_status] || batch.effective_status }}
+            </template>
+          </p>
+        </div>
+        <el-button type="primary" :loading="batchLoading" @click="startDailyBatch">更新今日数据</el-button>
+      </div>
+      <template v-if="batch">
+        <el-progress class="batch-progress" :percentage="batchProgress" :status="progressStatus" />
+        <div class="batch-counts">
+          <el-tag type="success" effect="plain">成功 {{ batch.success_count }}</el-tag>
+          <el-tag v-if="batch.pending_count" type="info" effect="plain">暂未发布 {{ batch.pending_count }}</el-tag>
+          <el-tag v-if="batch.failure_count" type="danger" effect="plain">失败 {{ batch.failure_count }}</el-tag>
+          <el-tag v-if="batch.skipped_count" type="warning" effect="plain">跳过 {{ batch.skipped_count }}</el-tag>
+          <el-tag v-if="batch.interrupted_count" type="danger" effect="plain">中断 {{ batch.interrupted_count }}</el-tag>
+        </div>
+        <el-alert
+          v-for="note in batchNotes"
+          :key="note"
+          class="alert-item"
+          type="info"
+          :closable="false"
+          :title="note"
+        />
+        <div class="toolbar batch-toolbar">
+          <el-button link type="primary" @click="go('/tasks')">查看批次明细</el-button>
+        </div>
+      </template>
+    </div>
+
+    <div class="section panel">
       <h2 class="section-title">今日待办</h2>
       <el-empty v-if="!todos.length" description="暂无待办事项" />
       <el-table v-else :data="todos" border stripe>
@@ -121,12 +158,21 @@
 
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import { api } from "../api/fundpilot";
 import { dateText, pct } from "../api/format";
-import type { Alert, DashboardTodo, DataHealth, MarketContext, Report, RiskItem, ScoreSignalSummary } from "../api/types";
+import type {
+  Alert,
+  DashboardTodo,
+  DataHealth,
+  MarketContext,
+  Report,
+  RiskItem,
+  ScoreSignalSummary,
+  TaskBatchInfo,
+} from "../api/types";
 import AlertGroup from "../components/AlertGroup.vue";
 import MetricCard from "../components/MetricCard.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
@@ -235,7 +281,84 @@ async function load() {
   }
 }
 
-onMounted(load);
+// —— 今日数据更新批次 ——
+const BATCH_STATUS_LABEL: Record<string, string> = {
+  queued: "排队中",
+  running: "运行中",
+  success: "已完成",
+  partial_success: "部分成功",
+  failed: "失败",
+  interrupted: "中断（可恢复）",
+};
+const BATCH_ACTIVE = new Set(["queued", "running"]);
+const batch = ref<TaskBatchInfo | null>(null);
+const batchLoading = ref(false);
+let batchTimer: number | undefined;
+
+const batchProgress = computed(() => {
+  const info = batch.value;
+  if (!info || !info.total_count) return 0;
+  const done = info.success_count + info.failure_count + info.skipped_count + info.pending_count + info.interrupted_count;
+  return Math.min(100, Math.round((done / info.total_count) * 100));
+});
+const progressStatus = computed<"" | "success" | "exception" | "warning" | undefined>(() => {
+  const info = batch.value;
+  if (!info || BATCH_ACTIVE.has(info.effective_status)) return undefined;
+  if (info.effective_status === "success") return "success";
+  if (info.effective_status === "partial_success") return "warning";
+  return "exception";
+});
+const batchNotes = computed(() => batch.value?.coverage_json?.notes || []);
+
+async function startDailyBatch() {
+  batchLoading.value = true;
+  try {
+    const result = await api.createDailyBatch();
+    batch.value = result.batch;
+    ElMessage.success(result.created ? "已提交今日更新批次" : "今日批次已存在，继续跟进进度");
+    scheduleBatchPolling();
+  } finally {
+    batchLoading.value = false;
+  }
+}
+
+async function refreshBatch() {
+  if (!batch.value) return;
+  try {
+    const detail = await api.taskBatchDetail(batch.value.id);
+    batch.value = detail.batch;
+  } catch {
+    // 网络波动时保留上一次状态，下一轮再试
+  }
+}
+
+function scheduleBatchPolling() {
+  window.clearTimeout(batchTimer);
+  if (!batch.value || !BATCH_ACTIVE.has(batch.value.effective_status)) return;
+  batchTimer = window.setTimeout(async () => {
+    await refreshBatch();
+    scheduleBatchPolling();
+  }, 3000);
+}
+
+async function loadLatestBatch() {
+  try {
+    const recent = await api.taskBatches(1);
+    if (recent.length) {
+      batch.value = recent[0];
+      scheduleBatchPolling();
+    }
+  } catch {
+    // 驾驶舱的核心内容不因批次接口失败而中断
+  }
+}
+
+onMounted(async () => {
+  await load();
+  await loadLatestBatch();
+});
+
+onUnmounted(() => window.clearTimeout(batchTimer));
 </script>
 
 <style scoped>
@@ -269,5 +392,27 @@ onMounted(load);
 
 .metric-action:hover :deep(.metric-card) {
   border-color: var(--color-accent-blue);
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.batch-progress {
+  margin-top: 12px;
+}
+
+.batch-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.batch-toolbar {
+  margin-top: 6px;
 }
 </style>

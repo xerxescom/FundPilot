@@ -7,10 +7,25 @@ from datetime import date, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import AIReport, FundIndicator, FundNav, FundScore, TaskRunLog, Watchlist
+from app.db.models import (
+    AIReport,
+    FundIndicator,
+    FundNav,
+    FundScore,
+    TaskBatch,
+    TaskBatchItem,
+    TaskRunLog,
+    Watchlist,
+)
 
 STALE_NAV_DAYS = 7
 NAV_GAP_DAYS = 10
+SYNC_STATUS_LABELS = {
+    "success": "成功",
+    "failed": "失败",
+    "pending": "暂未发布",
+    "interrupted": "中断",
+}
 
 
 def _latest_indicator_date(db: Session, fund_code: str) -> date | None:
@@ -76,7 +91,38 @@ def _log_result_payload(log: TaskRunLog) -> object | None:
         return None
 
 
+def _latest_batch_sync_status(db: Session, fund_code: str) -> tuple[str | None, str | None, date | None] | None:
+    """优先读取每日批次的同步项：pending（暂未发布）与 interrupted 只有批次知道。"""
+    row = db.execute(
+        select(TaskBatchItem, TaskBatch)
+        .join(TaskBatch, TaskBatch.id == TaskBatchItem.batch_id)
+        .where(
+            TaskBatchItem.step == "sync_nav",
+            TaskBatchItem.asset_type == "fund",
+            TaskBatchItem.asset_code == fund_code,
+        )
+        .order_by(TaskBatch.created_at.desc(), TaskBatchItem.id.desc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+    item, batch = row
+    sync_date = item.finished_at.date() if item.finished_at else batch.trade_date
+    if item.status == "success":
+        return "success", None, sync_date
+    if item.status == "failed":
+        return "failed", item.error_message, sync_date
+    if item.status == "pending":
+        return "pending", None, sync_date
+    if item.status == "interrupted":
+        return "interrupted", item.error_message, sync_date
+    return None  # queued/running/skipped：回落到任务日志
+
+
 def _latest_sync_status(db: Session, fund_code: str) -> tuple[str | None, str | None, date | None]:
+    batch_status = _latest_batch_sync_status(db, fund_code)
+    if batch_status is not None:
+        return batch_status
     logs = db.scalars(
         select(TaskRunLog)
         .where(
@@ -151,6 +197,14 @@ def fund_data_health(db: Session, fund_code: str, today: date | None = None) -> 
     if missing_return_count:
         status = "需关注"
         issues.append(f"存在 {missing_return_count} 条缺失日涨跌幅")
+    if latest_sync_status == "pending":
+        issues.append("最新净值暂未发布（不算失败，稍后补跑）")
+    elif latest_sync_status == "failed":
+        status = "需关注"
+        issues.append(f"最近一次净值同步失败：{latest_failure_reason or '原因未知'}")
+    elif latest_sync_status == "interrupted":
+        status = "需关注"
+        issues.append("最近一次同步被中断，可单独重试")
     if needs_indicator:
         issues.append("指标需要重新计算")
     if needs_score:

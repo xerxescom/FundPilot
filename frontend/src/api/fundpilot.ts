@@ -2,7 +2,11 @@ import { apiClient, deleteJson, getJson, patchJson, postJson, putJson } from "./
 import type {
   Alert,
   AnalyzeResult,
+  BatchDetail,
+  BatchRetryResult,
+  DailyBatchResult,
   DataHealth,
+  TaskBatchInfo,
   FundHoldingStock,
   FundNav,
   Indicator,
@@ -86,6 +90,11 @@ export const api = {
   latestReport: () => getJson<Report>("/reports/latest"),
   reportHistory: (limit = 50) => getJson<Report[]>("/reports/history", { limit }),
   ollamaStatus: () => getJson<unknown>("/reports/ollama/status"),
+  createDailyBatch: () => postJson<DailyBatchResult>("/tasks/batches/daily"),
+  taskBatches: (limit = 20) => getJson<TaskBatchInfo[]>("/tasks/batches", { limit }),
+  taskBatchDetail: (id: number) => getJson<BatchDetail>(`/tasks/batches/${id}`),
+  retryTaskBatch: (id: number, data: { step?: string; asset_type?: string; asset_code?: string; include_global?: boolean }) =>
+    postJson<BatchRetryResult>(`/tasks/batches/${id}/retry`, data),
   taskLogs: () => getJson<unknown[]>("/tasks/logs"),
   availableTasks: () =>
     getJson<Array<{ task_name: string; description: string; priority: string; scenario: string }>>("/tasks/available"),

@@ -30,6 +30,29 @@ def test_scheduler_config_can_be_enabled(monkeypatch):
     assert settings.enable_scheduler is True
 
 
+def test_scheduler_registers_single_daily_update_job(monkeypatch):
+    monkeypatch.setenv("ENABLE_SCHEDULER", "true")
+    get_settings.cache_clear()
+
+    from app.jobs.scheduler import create_scheduler
+
+    scheduler = create_scheduler()
+
+    assert [job.id for job in scheduler.get_jobs()] == ["daily_update"]
+
+
+def test_legacy_job_modules_remain_importable():
+    for module in (
+        "app.jobs.update_nav_job",
+        "app.jobs.market_job",
+        "app.jobs.calc_indicator_job",
+        "app.jobs.score_job",
+        "app.jobs.ai_report_job",
+        "app.jobs.alert_job",
+    ):
+        importlib.import_module(module)
+
+
 def test_task_descriptions_are_readable_chinese():
     tasks = {item["task_name"]: item for item in available_tasks()}
 

@@ -6,7 +6,9 @@ from app.db.models.indicator import FundIndicator
 from app.db.models.market import MarketIndexDaily, MarketValuationDaily
 from app.db.models.portfolio import PortfolioPosition, PortfolioTransaction
 from app.db.models.score import FundScore
+from app.db.models.task_batch import TaskBatch, TaskBatchItem
 from app.db.models.task_log import TaskRunLog
+from app.db.models.trade_calendar import TradeCalendar
 from app.db.models.watchlist import Watchlist
 
 __all__ = [
@@ -24,6 +26,9 @@ __all__ = [
     "MarketValuationDaily",
     "PortfolioPosition",
     "PortfolioTransaction",
+    "TaskBatch",
+    "TaskBatchItem",
     "TaskRunLog",
+    "TradeCalendar",
     "Watchlist",
 ]

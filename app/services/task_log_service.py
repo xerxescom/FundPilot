@@ -1,3 +1,4 @@
+import contextvars
 import json
 from time import perf_counter
 from typing import Any, Callable, TypeVar
@@ -8,6 +9,11 @@ from sqlalchemy.orm import Session
 from app.db.models import TaskRunLog
 
 T = TypeVar("T")
+
+# worker 在执行步骤期间设置，步骤内部产生的任务日志自动关联到该批次
+CURRENT_BATCH_ID: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "current_batch_id", default=None
+)
 
 STATUS_SUCCESS = "success"
 STATUS_PARTIAL_SUCCESS = "partial_success"
@@ -71,6 +77,7 @@ def record_task_log(
     failure_count: int | None = None,
     message: str | None = None,
     result_json: Any | None = None,
+    batch_id: int | None = None,
 ) -> TaskRunLog:
     log = TaskRunLog(
         task_name=task_name,
@@ -80,6 +87,7 @@ def record_task_log(
         failure_count=failure_count,
         message=message,
         result_json=result_json,
+        batch_id=batch_id if batch_id is not None else CURRENT_BATCH_ID.get(),
     )
     db.add(log)
     db.commit()

@@ -117,3 +117,23 @@ test("缺行情时展示估值完整性提示", async ({ page, request }) => {
   await expect(warning).toContainText("缺少最新净值");
   await expect(positionRow(page, PARTIAL_CODE).locator(".el-tag", { hasText: "缺失" })).toBeVisible();
 });
+
+test("驾驶舱可一键创建今日批次并显示进度", async ({ page }) => {
+  await page.goto("/");
+
+  const panel = page
+    .locator(".panel")
+    .filter({ has: page.getByRole("heading", { name: "今日数据更新", exact: true }) })
+    .first();
+  await expect(panel).toBeVisible();
+
+  await panel.getByRole("button", { name: "更新今日数据" }).click();
+
+  // 无 worker 运行时批次停留在排队中，页面应显示批次号与进度条
+  await expect(panel).toContainText("批次 #");
+  await expect(panel.locator(".el-progress")).toBeVisible();
+
+  // 重复点击返回同一批次（幂等），页面不会出现第二个批次提示
+  await panel.getByRole("button", { name: "更新今日数据" }).click();
+  await expect(page.locator(".el-message").last()).toContainText("已存在");
+});

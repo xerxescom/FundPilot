@@ -373,6 +373,68 @@ export interface Asset {
   source?: Nullable<string>;
 }
 
+export interface BatchCoverage {
+  trade_date?: Nullable<string>;
+  calendar_source?: Nullable<string>;
+  steps?: Record<string, Record<string, number>>;
+  asset_counts?: { total: number; success: number; pending: number; failed: number };
+  notes?: string[];
+}
+
+export interface TaskBatchInfo {
+  id: number;
+  batch_type: string;
+  status: string;
+  effective_status: string;
+  trade_date?: Nullable<string>;
+  created_at?: Nullable<string>;
+  started_at?: Nullable<string>;
+  finished_at?: Nullable<string>;
+  heartbeat_at?: Nullable<string>;
+  lease_expires_at?: Nullable<string>;
+  total_count: number;
+  success_count: number;
+  failure_count: number;
+  skipped_count: number;
+  pending_count: number;
+  interrupted_count: number;
+  params_json?: unknown;
+  coverage_json?: Nullable<BatchCoverage>;
+}
+
+export interface BatchItem {
+  id: number;
+  step: string;
+  step_label: string;
+  asset_type: string;
+  asset_code: string;
+  display_name?: Nullable<string>;
+  status: string;
+  effective_status: string;
+  error_class?: Nullable<string>;
+  error_message?: Nullable<string>;
+  retry_count: number;
+  max_retries: number;
+  result_json?: unknown;
+  started_at?: Nullable<string>;
+  finished_at?: Nullable<string>;
+}
+
+export interface DailyBatchResult {
+  created: boolean;
+  batch: TaskBatchInfo;
+}
+
+export interface BatchDetail {
+  batch: TaskBatchInfo;
+  items: BatchItem[];
+}
+
+export interface BatchRetryResult {
+  retried: number;
+  batch: TaskBatchInfo;
+}
+
 export interface DataHealth {
   watchlist_count: number;
   latest_nav_date?: Nullable<string>;

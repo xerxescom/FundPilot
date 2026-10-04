@@ -24,6 +24,19 @@ class Settings(BaseSettings):
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     qwen_vl_model: str = "qwen-vl-plus"
     qwen_timeout: float = 90.0
+    # 批次与交易日历
+    market_close_time: str = "15:00"
+    trade_calendar_refresh_days: int = 7
+    fund_disclosure_grace_trade_days: int = 3
+    market_data_grace_trade_days: int = 1
+    batch_item_max_retries: int = 3
+    batch_recovery_window_days: int = 3
+    interrupted_requeue_delay_seconds: int = 30
+    # worker 心跳与租约
+    worker_poll_seconds: float = 2.0
+    heartbeat_interval_seconds: int = 15
+    lease_ttl_seconds: int = 120
+    shutdown_grace_seconds: int = 30
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

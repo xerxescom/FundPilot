@@ -14,9 +14,12 @@ FundPilot 使用 SQLAlchemy ORM 和 Alembic 管理数据库结构。开发期可
 - `portfolio_position`：本地汇总持仓；保留 `fund_code` 兼容历史数据，新增 `asset_type` 与 `asset_code` 统一表示基金、股票和 ETF。
 - `portfolio_transaction`：统一交易流水，支持买入、卖出、申购和赎回，并按资产类型重算剩余成本与数量。
 - `alert_event`：风险预警，包含未读、已读、已处理、忽略等状态。
-- `ai_report`：日报和基金解释。
+- `ai_report`：日报和基金解释；`batch_id`/`trade_date` 关联每日批次，`(report_type, batch_id)` 唯一约束保证同一批次只有一份日报。
 - `market_index_daily`：市场指数数据。
-- `task_run_log`：同步、计算、报告生成等任务日志。
+- `task_run_log`：同步、计算、报告生成等任务日志；`result_json` 保存结构化子项结果，`batch_id` 关联所属批次。
+- `task_batch`：每日更新批次（幂等键 `daily_update:{交易日}`、状态、计数、覆盖率、租约与心跳）。
+- `task_batch_item`：批次步骤项（步骤、资产、状态含 `pending` 暂未发布与 `interrupted` 中断、错误分类、重试次数、租约）。
+- `trade_calendar`：缓存的交易日历；覆盖范围内无记录的日期视为休市，范围外回退周末规则。
 
 ## 初始化策略
 

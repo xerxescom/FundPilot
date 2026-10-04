@@ -19,4 +19,6 @@ class TaskRunLog(Base):
     message: Mapped[str | None] = mapped_column(Text)
     # Full structured per-item result; message stays as the human-readable preview.
     result_json: Mapped[Any | None] = mapped_column(JSON)
+    # Links logs produced inside a daily batch to its task_batch row.
+    batch_id: Mapped[int | None] = mapped_column(Integer, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
