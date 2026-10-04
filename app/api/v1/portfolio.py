@@ -70,7 +70,11 @@ def list_transactions(
 
 @router.delete("/transactions/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
-    if not portfolio_service.delete_transaction(db, transaction_id):
+    try:
+        deleted = portfolio_service.delete_transaction(db, transaction_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not deleted:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"detail": "deleted"}
 
@@ -111,7 +115,10 @@ def portfolio_correlation(db: Session = Depends(get_db)):
 
 @router.put("/{position_id}", response_model=PortfolioOut)
 def update_position(position_id: int, payload: PortfolioUpdate, db: Session = Depends(get_db)):
-    position = portfolio_service.update_position(db, position_id, payload.model_dump(exclude_unset=True))
+    try:
+        position = portfolio_service.update_position(db, position_id, payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not position:
         raise HTTPException(status_code=404, detail="Position not found")
     return position

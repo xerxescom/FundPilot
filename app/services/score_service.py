@@ -431,7 +431,7 @@ def _portfolio_fit(
     thresholds = get_thresholds()
     fund_code = fund_code.zfill(6)
     overview = portfolio_overview or portfolio_service.portfolio_overview(db)
-    total_value = overview["total_value"]
+    total_value = overview.get("total_value")
     held_weight = None
     for item in overview["positions"]:
         position = item["position"]
@@ -461,6 +461,8 @@ def _portfolio_fit(
         flags.append("high_correlation")
     if not overview["positions"]:
         reasons.append("当前没有持仓数据，组合适配采用中性偏高评估")
+    elif overview.get("is_complete") is False:
+        reasons.append("组合估值不完整，暂无法确认该基金在组合中的真实权重")
     if not reasons:
         reasons.append("未触发持仓集中或高相关规则，组合适配较好")
 

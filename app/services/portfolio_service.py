@@ -15,8 +15,12 @@ from app.services import asset_service
 from app.services.nav_service import latest_nav
 
 AUTO_SUMMARY_NOTE = "由交易记录自动汇总"
+OPENING_NOTE = "期初持仓"
 SELL_TYPES = {"sell", "redemption"}
-BUY_TYPES = {"buy", "subscription"}
+BUY_TYPES = {"buy", "subscription", "opening"}
+LEDGER_MANAGED_FIELDS = {"holding_amount", "holding_share", "cost_nav", "buy_date"}
+DRAWDOWN_WINDOW = 30
+MIN_DRAWDOWN_DAYS = 2
 
 
 def _quantize(value: Decimal, places: str) -> Decimal:
@@ -56,6 +60,42 @@ def _ensure_listed_asset(db: Session, asset_type: str, asset_code: str) -> None:
         )
 
 
+def _position_criteria(asset_type: str, asset_code: str):
+    # asset_code is NULL on legacy rows; fund_code keeps the code for those.
+    return (
+        PortfolioPosition.asset_type == asset_type,
+        (PortfolioPosition.asset_code == asset_code)
+        | (PortfolioPosition.asset_code.is_(None) & (PortfolioPosition.fund_code == asset_code)),
+    )
+
+
+def _transaction_criteria(asset_type: str, asset_code: str):
+    return (
+        PortfolioTransaction.asset_type == asset_type,
+        (PortfolioTransaction.asset_code == asset_code)
+        | (PortfolioTransaction.asset_code.is_(None) & (PortfolioTransaction.fund_code == asset_code)),
+    )
+
+
+def _position_row(
+    db: Session, asset_type: str, asset_code: str, for_update: bool = False
+) -> PortfolioPosition | None:
+    stmt = select(PortfolioPosition).where(*_position_criteria(asset_type, asset_code))
+    if for_update:
+        stmt = stmt.with_for_update()
+    return db.scalar(stmt)
+
+
+def _asset_transactions(db: Session, asset_type: str, asset_code: str) -> list[PortfolioTransaction]:
+    return list(
+        db.scalars(
+            select(PortfolioTransaction)
+            .where(*_transaction_criteria(asset_type, asset_code))
+            .order_by(PortfolioTransaction.trade_date.asc(), PortfolioTransaction.id.asc())
+        )
+    )
+
+
 def create_position(db: Session, data: dict) -> PortfolioPosition:
     asset_type, asset_code = _payload_identity(data)
     _ensure_listed_asset(db, asset_type, asset_code)
@@ -73,20 +113,8 @@ def create_position(db: Session, data: dict) -> PortfolioPosition:
     return position
 
 
-def _rebuild_position_from_transactions(db: Session, asset_type: str, asset_code: str) -> PortfolioPosition | None:
-    transactions = list(
-        db.scalars(
-            select(PortfolioTransaction)
-            .where(
-                PortfolioTransaction.asset_type == asset_type,
-                PortfolioTransaction.asset_code == asset_code,
-            )
-            .order_by(PortfolioTransaction.trade_date.asc(), PortfolioTransaction.id.asc())
-        )
-    )
-    if not transactions:
-        return None
-
+def _replay_transactions(transactions: list[PortfolioTransaction]) -> tuple[Decimal, Decimal]:
+    """Replay the ledger chronologically; raises when a sell exceeds the shares available that day."""
     holding_share = Decimal("0")
     holding_cost = Decimal("0")
     for transaction in transactions:
@@ -95,20 +123,28 @@ def _rebuild_position_from_transactions(db: Session, asset_type: str, asset_code
         fee = Decimal(transaction.fee or 0)
         if transaction.trade_type in SELL_TYPES:
             if share > holding_share:
-                raise ValueError("卖出份额超过当前可用持仓")
+                raise ValueError(
+                    f"卖出份额超过 {transaction.trade_date} 可用持仓：需要 {share} 份，当日仅有 {holding_share} 份"
+                )
             average_cost = holding_cost / holding_share if holding_share else Decimal("0")
             holding_cost -= average_cost * share
             holding_share -= share
         else:
             holding_share += share
             holding_cost += amount + fee
+    return holding_share, holding_cost
 
-    position = db.scalar(
-        select(PortfolioPosition).where(
-            PortfolioPosition.asset_type == asset_type,
-            PortfolioPosition.asset_code == asset_code,
-        )
-    )
+
+def _rebuild_position_from_transactions(
+    db: Session, asset_type: str, asset_code: str
+) -> PortfolioPosition | None:
+    """Rebuild the position from the ledger. Flushes only; the caller owns commit/rollback."""
+    transactions = _asset_transactions(db, asset_type, asset_code)
+    if not transactions:
+        return None
+
+    holding_share, holding_cost = _replay_transactions(transactions)
+    position = _position_row(db, asset_type, asset_code)
     cost_nav = holding_cost / holding_share if holding_share else None
     values = {
         "holding_amount": _quantize(holding_cost, "0.0001"),
@@ -128,9 +164,58 @@ def _rebuild_position_from_transactions(db: Session, asset_type: str, asset_code
             **values,
         )
         db.add(position)
-    db.commit()
-    db.refresh(position)
+    db.flush()
     return position
+
+
+def _build_opening_transaction(position: PortfolioPosition) -> PortfolioTransaction | None:
+    """Build the dated opening event for a manual/screenshot holding without inventing cost."""
+    share = Decimal(position.holding_share or 0)
+    if share <= 0:
+        return None
+    nav = Decimal(position.cost_nav) if position.cost_nav is not None else None
+    amount = Decimal(position.holding_amount) if position.holding_amount is not None else None
+    if nav is None and amount is not None:
+        nav = amount / share
+    if amount is None and nav is not None:
+        amount = share * nav
+    if nav is None or nav <= 0 or amount is None or amount <= 0:
+        return None
+
+    asset_type, asset_code = _identity(position)
+    trade_date = position.buy_date or (position.created_at.date() if position.created_at else date.today())
+    note = f"{OPENING_NOTE}；来源：{position.note}" if position.note else OPENING_NOTE
+    return PortfolioTransaction(
+        fund_code=asset_code,
+        asset_type=asset_type,
+        asset_code=asset_code,
+        trade_date=trade_date,
+        trade_type="opening",
+        amount=_quantize(amount, "0.0001"),
+        nav=_quantize(nav, "0.000001"),
+        share=_quantize(share, "0.0001"),
+        fee=Decimal("0"),
+        note=note,
+    )
+
+
+def ensure_opening_transaction(db: Session, position: PortfolioPosition | None) -> PortfolioTransaction | None:
+    """Materialize manual/screenshot holdings as the first ledger event before replaying transactions."""
+    if position is None or position.note == AUTO_SUMMARY_NOTE:
+        return None
+    asset_type, asset_code = _identity(position)
+    has_transactions = db.scalar(
+        select(PortfolioTransaction.id).where(*_transaction_criteria(asset_type, asset_code)).limit(1)
+    )
+    if has_transactions:
+        return None
+    opening = _build_opening_transaction(position)
+    if opening is None:
+        if Decimal(position.holding_share or 0) > 0:
+            raise ValueError("该持仓缺少成本信息，无法自动生成期初记录；请先补全持仓成本后再记录交易")
+        return None
+    db.add(opening)
+    return opening
 
 
 def create_transaction(db: Session, data: dict) -> PortfolioTransaction:
@@ -140,42 +225,51 @@ def create_transaction(db: Session, data: dict) -> PortfolioTransaction:
     fee = Decimal(data.get("fee") or 0)
     trade_type = data.get("trade_type") or "buy"
     if trade_type not in BUY_TYPES | SELL_TYPES:
-        raise ValueError("trade_type must be buy, sell, subscription or redemption")
+        raise ValueError("trade_type must be buy, sell, subscription, redemption or opening")
     if amount <= 0 or price <= 0 or fee < 0:
         raise ValueError("amount and price must be positive, and fee cannot be negative")
     share = Decimal(data.get("share") or 0)
     if share <= 0:
         share = amount / price
 
-    if trade_type in SELL_TYPES:
-        position = db.scalar(
-            select(PortfolioPosition).where(
-                PortfolioPosition.asset_type == asset_type,
-                PortfolioPosition.asset_code == asset_code,
-            )
-        )
-        available_share = Decimal(position.holding_share or 0) if position else Decimal("0")
-        if share > available_share:
-            raise ValueError("卖出份额超过当前可用持仓")
-
     _ensure_listed_asset(db, asset_type, asset_code)
-    transaction = PortfolioTransaction(
-        # fund_code remains populated as a legacy-compatible alias for old database rows and APIs.
-        fund_code=asset_code,
-        asset_type=asset_type,
-        asset_code=asset_code,
-        trade_date=data["trade_date"],
-        trade_type=trade_type,
-        amount=_quantize(amount, "0.0001"),
-        nav=_quantize(price, "0.000001"),
-        share=_quantize(share, "0.0001"),
-        fee=_quantize(fee, "0.0001"),
-        note=data.get("note"),
-    )
-    db.add(transaction)
-    db.commit()
+    try:
+        position = _position_row(db, asset_type, asset_code, for_update=True)
+        if trade_type == "opening":
+            existing_opening = db.scalar(
+                select(PortfolioTransaction.id)
+                .where(*_transaction_criteria(asset_type, asset_code))
+                .where(PortfolioTransaction.trade_type == "opening")
+                .limit(1)
+            )
+            if existing_opening:
+                raise ValueError("该资产已存在期初持仓记录，不能重复添加")
+            if position is not None and Decimal(position.holding_share or 0) > 0:
+                raise ValueError("该资产已有手工或截图持仓，请先删除该持仓或用交易记录调整")
+        else:
+            ensure_opening_transaction(db, position)
+
+        transaction = PortfolioTransaction(
+            # fund_code remains populated as a legacy-compatible alias for old database rows and APIs.
+            fund_code=asset_code,
+            asset_type=asset_type,
+            asset_code=asset_code,
+            trade_date=data["trade_date"],
+            trade_type=trade_type,
+            amount=_quantize(amount, "0.0001"),
+            nav=_quantize(price, "0.000001"),
+            share=_quantize(share, "0.0001"),
+            fee=_quantize(fee, "0.0001"),
+            note=data.get("note"),
+        )
+        db.add(transaction)
+        db.flush()
+        _rebuild_position_from_transactions(db, asset_type, asset_code)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(transaction)
-    _rebuild_position_from_transactions(db, asset_type, asset_code)
     return transaction
 
 
@@ -196,19 +290,18 @@ def delete_transaction(db: Session, transaction_id: int) -> bool:
     if not transaction:
         return False
     asset_type, asset_code = _identity(transaction)
-    db.delete(transaction)
-    db.commit()
-    rebuilt = _rebuild_position_from_transactions(db, asset_type, asset_code)
-    if rebuilt is None:
-        position = db.scalar(
-            select(PortfolioPosition).where(
-                PortfolioPosition.asset_type == asset_type,
-                PortfolioPosition.asset_code == asset_code,
-            )
-        )
-        if position and position.note == AUTO_SUMMARY_NOTE:
-            db.delete(position)
-            db.commit()
+    try:
+        db.delete(transaction)
+        db.flush()
+        rebuilt = _rebuild_position_from_transactions(db, asset_type, asset_code)
+        if rebuilt is None:
+            position = _position_row(db, asset_type, asset_code)
+            if position and position.note == AUTO_SUMMARY_NOTE:
+                db.delete(position)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return True
 
 
@@ -220,6 +313,13 @@ def update_position(db: Session, position_id: int, data: dict) -> PortfolioPosit
     position = db.get(PortfolioPosition, position_id)
     if not position:
         return None
+    if LEDGER_MANAGED_FIELDS & set(data):
+        asset_type, asset_code = _identity(position)
+        has_transactions = db.scalar(
+            select(PortfolioTransaction.id).where(*_transaction_criteria(asset_type, asset_code)).limit(1)
+        )
+        if has_transactions:
+            raise ValueError("该持仓已由交易流水管理，不能直接修改份额、成本或买入日期；请通过交易记录调整")
     for key, value in data.items():
         if value is not None:
             setattr(position, key, value)
@@ -237,111 +337,209 @@ def delete_position(db: Session, position_id: int) -> bool:
     return True
 
 
-def _asset_name_and_price(db: Session, asset_type: str, asset_code: str) -> tuple[str | None, Decimal | None]:
+def _asset_snapshot(db: Session, asset_type: str, asset_code: str) -> dict:
     if asset_type == "fund":
         nav = latest_nav(db, asset_code)
         fund = db.scalar(select(FundInfo).where(FundInfo.fund_code == asset_code))
-        return (fund.fund_name if fund else None, Decimal(nav.unit_nav) if nav and nav.unit_nav is not None else None)
+        usable = nav is not None and nav.unit_nav is not None
+        return {
+            "name": fund.fund_name if fund else None,
+            "price": Decimal(nav.unit_nav) if usable else None,
+            "price_date": nav.nav_date if usable else None,
+            "price_source": nav.source if usable else None,
+        }
     asset = asset_service.get_asset(db, asset_code)
     price = asset_service.latest_price(db, asset_code)
-    return (asset.asset_name if asset else None, Decimal(price.close) if price and price.close is not None else None)
+    usable = price is not None and price.close is not None
+    return {
+        "name": asset.asset_name if asset else None,
+        "price": Decimal(price.close) if usable else None,
+        "price_date": price.price_date if usable else None,
+        "price_source": price.source if usable else None,
+    }
+
+
+def _position_cost(position: PortfolioPosition) -> Decimal | None:
+    if position.holding_amount is not None:
+        return Decimal(position.holding_amount)
+    if position.cost_nav is not None and position.holding_share is not None:
+        return Decimal(position.holding_share) * Decimal(position.cost_nav)
+    return None
 
 
 def position_summary(db: Session, position: PortfolioPosition) -> dict:
     asset_type, asset_code = _identity(position)
-    asset_name, latest = _asset_name_and_price(db, asset_type, asset_code)
-    if latest is None or position.holding_share is None:
-        return {
-            "position": position,
-            "asset_type": asset_type,
-            "asset_code": asset_code,
-            "asset_name": asset_name,
-            "fund_name": asset_name if asset_type == "fund" else None,
-            "latest_price": latest,
-            "latest_nav": latest if asset_type == "fund" else None,
-            "current_value": None,
-            "profit_amount": None,
-            "profit_rate": None,
-        }
-    current_value = Decimal(position.holding_share) * latest
-    cost = Decimal(position.holding_amount) if position.holding_amount is not None else None
-    if cost is None and position.cost_nav is not None:
-        cost = Decimal(position.holding_share) * Decimal(position.cost_nav)
-    profit = current_value - cost if cost is not None else None
+    snapshot = _asset_snapshot(db, asset_type, asset_code)
+    latest = snapshot["price"]
+    share = Decimal(position.holding_share) if position.holding_share is not None else None
+    cost = _position_cost(position)
+
+    missing_reason = None
+    current_value = None
+    if share is None:
+        missing_reason = "缺少持仓份额"
+    elif share == 0:
+        current_value = Decimal("0")
+    elif latest is None:
+        missing_reason = "缺少最新净值" if asset_type == "fund" else "缺少最新行情"
+    else:
+        current_value = share * latest
+
+    profit = None
+    profit_rate = None
+    if current_value is not None and cost is not None:
+        profit = current_value - cost
+        profit_rate = profit / cost if cost else None
+
     return {
         "position": position,
         "asset_type": asset_type,
         "asset_code": asset_code,
-        "asset_name": asset_name,
-        "fund_name": asset_name if asset_type == "fund" else None,
+        "asset_name": snapshot["name"],
+        "fund_name": snapshot["name"] if asset_type == "fund" else None,
         "latest_price": latest,
         "latest_nav": latest if asset_type == "fund" else None,
+        "price_date": snapshot["price_date"],
+        "price_source": snapshot["price_source"],
+        "missing_reason": missing_reason,
         "current_value": current_value,
         "profit_amount": profit,
-        "profit_rate": profit / cost if profit is not None and cost else None,
+        "profit_rate": profit_rate,
     }
 
 
 def portfolio_overview(db: Session) -> dict:
     summaries = [position_summary(db, item) for item in list_positions(db)]
-    total_value = sum((item["current_value"] or Decimal("0")) for item in summaries)
-    total_cost = sum(
-        (
-            Decimal(summary["position"].holding_amount)
-            if summary["position"].holding_amount is not None
-            else Decimal(summary["position"].holding_share or 0) * Decimal(summary["position"].cost_nav or 0)
-        )
+    missing_price_assets = [
+        {
+            "asset_type": summary["asset_type"],
+            "asset_code": summary["asset_code"],
+            "asset_name": summary["asset_name"],
+            "reason": summary["missing_reason"],
+        }
         for summary in summaries
-    )
-    profit_amount = total_value - total_cost if total_cost else None
-    weights = [(summary["current_value"] or Decimal("0")) / total_value for summary in summaries] if total_value else []
+        if summary["missing_reason"]
+    ]
+    missing_cost_assets = [
+        {
+            "asset_type": summary["asset_type"],
+            "asset_code": summary["asset_code"],
+            "asset_name": summary["asset_name"],
+            "reason": "缺少成本信息",
+        }
+        for summary in summaries
+        if _position_cost(summary["position"]) is None
+        and Decimal(summary["position"].holding_share or 0) > 0
+    ]
+    priced = [summary for summary in summaries if summary["current_value"] is not None]
+    known_value = sum((summary["current_value"] for summary in priced), Decimal("0"))
+    total_cost = sum((_position_cost(summary["position"]) or Decimal("0") for summary in summaries), Decimal("0"))
+    is_complete = not missing_price_assets
+    if not summaries:
+        valuation_status = "empty"
+    elif is_complete:
+        valuation_status = "complete"
+    else:
+        valuation_status = "partial"
+
+    price_dates = [summary["price_date"] for summary in priced if summary["price_date"]]
+    price_as_of = max(price_dates) if price_dates else None
+    total_value = known_value if is_complete else None
+
+    profit_amount = None
+    profit_rate = None
+    if is_complete and not missing_cost_assets and total_cost:
+        profit_amount = total_value - total_cost
+        profit_rate = profit_amount / total_cost
+    weights = [summary["current_value"] / total_value for summary in priced] if total_value else []
+
+    detail = portfolio_drawdown_detail(db)
     return {
+        "as_of": date.today(),
+        "price_as_of": price_as_of,
+        "valuation_status": valuation_status,
+        "is_complete": is_complete,
+        "known_value": known_value,
+        "priced_position_count": len(priced),
+        "missing_price_assets": missing_price_assets,
+        "missing_cost_assets": missing_cost_assets,
         "total_value": total_value,
         "total_cost": total_cost if total_cost else None,
         "profit_amount": profit_amount,
-        "profit_rate": profit_amount / total_cost if profit_amount is not None and total_cost else None,
+        "profit_rate": profit_rate,
         "max_weight": max(weights) if weights else None,
-        "drawdown_1m": portfolio_drawdown_1m(db),
+        "drawdown_1m": detail["drawdown_1m"],
+        "drawdown_basis": detail["basis"],
         "positions": summaries,
     }
 
 
-def portfolio_drawdown_1m(db: Session) -> Decimal | None:
-    positions = [item for item in list_positions(db) if item.holding_share is not None]
-    if not positions:
-        return None
-    rows: list[dict] = []
+def portfolio_drawdown_detail(db: Session) -> dict:
+    """Current-holdings historical simulation.
+
+    Values today's holdings at each past price; only dates on which every included
+    asset has a price are used, so missing quotes never fabricate a drop.
+    """
+    positions = [
+        item
+        for item in list_positions(db)
+        if item.holding_share is not None and Decimal(item.holding_share) > 0
+    ]
+    series: dict[str, pd.Series] = {}
+    excluded: list[str] = []
     for position in positions:
         asset_type, asset_code = _identity(position)
         share = Decimal(position.holding_share)
         if asset_type == "fund":
-            prices = db.scalars(
+            price_rows = db.scalars(
                 select(FundNav)
                 .where(FundNav.fund_code == asset_code, FundNav.unit_nav.is_not(None))
                 .order_by(FundNav.nav_date.asc())
             )
-            rows.extend(
-                {"date": item.nav_date, "asset_code": asset_code, "value": float(Decimal(item.unit_nav) * share)}
-                for item in prices
-            )
+            rows = [(item.nav_date, Decimal(item.unit_nav)) for item in price_rows]
         else:
-            prices = db.scalars(
+            price_rows = db.scalars(
                 select(AssetPriceDaily)
                 .where(AssetPriceDaily.asset_code == asset_code, AssetPriceDaily.close.is_not(None))
                 .order_by(AssetPriceDaily.price_date.asc())
             )
-            rows.extend(
-                {"date": item.price_date, "asset_code": asset_code, "value": float(Decimal(item.close) * share)}
-                for item in prices
-            )
-    if not rows:
-        return None
-    frame = pd.DataFrame(rows)
-    daily_value = frame.pivot_table(index="date", columns="asset_code", values="value").sum(axis=1)
-    one_month = daily_value.tail(30)
-    if len(one_month) < 2:
-        return None
-    return Decimal(str(float((one_month / one_month.cummax() - 1).min()))).quantize(Decimal("0.000001"))
+            rows = [(item.price_date, Decimal(item.close)) for item in price_rows]
+        if not rows:
+            excluded.append(asset_code)
+            continue
+        series[asset_code] = pd.Series({day: float(value * share) for day, value in rows})
+
+    basis = {
+        "basis": "current_holdings_simulation",
+        "label": "当前持仓历史模拟",
+        "window": f"最近{DRAWDOWN_WINDOW}个共同交易日",
+        "window_days": DRAWDOWN_WINDOW,
+        "aligned_days": 0,
+        "included_asset_count": len(series),
+        "excluded_asset_codes": excluded,
+        "start_date": None,
+        "end_date": None,
+    }
+    if not series:
+        return {"drawdown_1m": None, "basis": basis}
+
+    frame = pd.DataFrame(series)
+    aligned = frame.dropna(how="any")
+    window = aligned.tail(DRAWDOWN_WINDOW)
+    basis["aligned_days"] = len(window)
+    if len(window):
+        basis["start_date"] = pd.Timestamp(window.index[0]).date()
+        basis["end_date"] = pd.Timestamp(window.index[-1]).date()
+    if len(window) < MIN_DRAWDOWN_DAYS:
+        return {"drawdown_1m": None, "basis": basis}
+
+    daily_value = window.sum(axis=1)
+    drawdown = Decimal(str(float((daily_value / daily_value.cummax() - 1).min()))).quantize(Decimal("0.000001"))
+    return {"drawdown_1m": drawdown, "basis": basis}
+
+
+def portfolio_drawdown_1m(db: Session) -> Decimal | None:
+    return portfolio_drawdown_detail(db)["drawdown_1m"]
 
 
 def portfolio_diagnosis(db: Session) -> dict:
@@ -351,17 +549,35 @@ def portfolio_diagnosis(db: Session) -> dict:
     risk_items = []
     max_weight = overview["max_weight"]
     drawdown_1m = overview["drawdown_1m"]
-    stale_positions = [item for item in positions if item["latest_price"] is None]
+    basis = overview["drawdown_basis"]
+    stale_positions = [item for item in positions if item["missing_reason"]]
     if max_weight is not None and max_weight >= Decimal(str(thresholds.portfolio_concentration)):
         risk_items.append({"level": "medium", "title": "持仓集中度偏高", "description": f"单一资产估算占比达到 {max_weight:.2%}，建议重点观察其对组合波动的影响。"})
     if drawdown_1m is not None and drawdown_1m <= Decimal(str(thresholds.portfolio_drawdown_alert)):
-        risk_items.append({"level": "medium", "title": "组合近 1 月回撤较大", "description": f"组合近 1 月估算最大回撤为 {drawdown_1m:.2%}，建议结合市场环境复盘。"})
+        risk_items.append(
+            {
+                "level": "medium",
+                "title": "组合近 1 月回撤较大",
+                "description": f"组合近 1 月估算最大回撤为 {drawdown_1m:.2%}（{basis['label']}口径，{basis['window']}），建议结合市场环境复盘。",
+            }
+        )
     if stale_positions:
         risk_items.append({"level": "low", "title": "部分持仓缺少最新行情", "description": f"{len(stale_positions)} 个持仓暂时无法估算最新市值，请先同步对应行情或净值。"})
     if not risk_items:
         risk_items.append({"level": "info", "title": "暂无突出组合风险", "description": "当前组合未触发集中度、回撤或行情缺失规则，仍建议持续观察预警变化。"})
     return {
-        "summary": {"position_count": len(positions), "total_value": overview["total_value"], "profit_rate": overview["profit_rate"], "max_weight": max_weight, "drawdown_1m": drawdown_1m},
+        "summary": {
+            "position_count": len(positions),
+            "total_value": overview["total_value"],
+            "known_value": overview["known_value"],
+            "is_complete": overview["is_complete"],
+            "valuation_status": overview["valuation_status"],
+            "missing_price_count": len(overview["missing_price_assets"]),
+            "profit_rate": overview["profit_rate"],
+            "max_weight": max_weight,
+            "drawdown_1m": drawdown_1m,
+            "drawdown_basis": basis,
+        },
         "risk_items": risk_items,
         "observation": "组合诊断仅用于风险观察和复盘，不构成买入或卖出建议。",
     }
@@ -378,24 +594,14 @@ def import_screenshot_holdings(
         asset_type = holding.asset_type
         asset_code = asset_service.normalize_asset_code(holding.asset_code, asset_type)
         has_transactions = db.scalar(
-            select(PortfolioTransaction.id)
-            .where(
-                PortfolioTransaction.asset_type == asset_type,
-                PortfolioTransaction.asset_code == asset_code,
-            )
-            .limit(1)
+            select(PortfolioTransaction.id).where(*_transaction_criteria(asset_type, asset_code)).limit(1)
         )
         if has_transactions:
             skipped.append({"asset_code": asset_code, "reason": "已有交易流水，未用截图覆盖成本与持仓"})
             continue
 
         _upsert_screenshot_asset_metadata(db, holding, asset_code, as_of_date)
-        position = db.scalar(
-            select(PortfolioPosition).where(
-                PortfolioPosition.asset_type == asset_type,
-                PortfolioPosition.asset_code == asset_code,
-            )
-        )
+        position = _position_row(db, asset_type, asset_code)
         cost_price = Decimal(holding.cost_price) if holding.cost_price is not None else None
         values = {
             "holding_share": _quantize(Decimal(holding.holding_share), "0.0001"),

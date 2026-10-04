@@ -4,9 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.thresholds import get_thresholds
-from app.db.models import AlertEvent, FundIndicator, FundNav, FundScore, PortfolioPosition
+from app.db.models import AlertEvent, FundIndicator, FundNav, FundScore
 from app.db.models.fund import FundInfo
-from app.services.portfolio_service import portfolio_drawdown_1m, position_summary
+from app.services import portfolio_service
 
 
 def _build_name_map(db: Session, codes: list[str]) -> dict[str, str]:
@@ -155,9 +155,11 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
                     )
                 )
 
-    # Position weight alerts
-    summaries = [position_summary(db, item) for item in db.scalars(select(PortfolioPosition))]
-    total = sum((s["current_value"] or Decimal("0")) for s in summaries)
+    # Position weight alerts. Skipped while valuation is incomplete: weights over the priced
+    # subset alone would misrepresent the portfolio.
+    overview = portfolio_service.portfolio_overview(db)
+    summaries = overview["positions"]
+    total = overview["total_value"]
     if total:
         pos_codes = [s["position"].fund_code for s in summaries]
         pos_name_map = _build_name_map(db, pos_codes)
@@ -177,8 +179,10 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
                     )
                 )
 
-    drawdown_1m = portfolio_drawdown_1m(db)
+    detail = portfolio_service.portfolio_drawdown_detail(db)
+    drawdown_1m = detail["drawdown_1m"]
     if drawdown_1m is not None and drawdown_1m <= Decimal(str(thresholds.portfolio_drawdown_alert)):
+        basis = detail["basis"]
         alerts.append(
             _upsert_alert(
                 db,
@@ -186,7 +190,7 @@ def generate_alerts(db: Session) -> list[AlertEvent]:
                 None,
                 "medium",
                 f"组合近 1 月回撤超过 {abs(thresholds.portfolio_drawdown_alert):.0%}",
-                f"当前估算近 1 月组合最大回撤为 {drawdown_1m:.2%}",
+                f"当前估算近 1 月组合最大回撤为 {drawdown_1m:.2%}（{basis['label']}口径，{basis['window']}）",
             )
         )
     return alerts

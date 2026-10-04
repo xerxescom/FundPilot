@@ -48,6 +48,17 @@ def _fallback_report(data: dict) -> str:
     ]
     portfolio = data.get("portfolio_overview", {})
     health = data.get("data_health", {})
+    if portfolio.get("total_value") is None:
+        missing = portfolio.get("missing_price_assets") or []
+        portfolio_line = (
+            f"组合估值不完整（{len(missing)} 项缺少行情），"
+            f"已知部分市值：{portfolio.get('known_value')}，暂不展示整体盈亏。\n\n"
+        )
+    else:
+        portfolio_line = (
+            f"组合当前市值：{portfolio.get('total_value')}，"
+            f"收益率：{portfolio.get('profit_rate')}。\n\n"
+        )
     return (
         "今日概况\n"
         "系统已基于本地净值、指标和评分数据生成规则摘要。\n"
@@ -55,8 +66,7 @@ def _fallback_report(data: dict) -> str:
         "市场背景\n"
         f"{chr(10).join(market_lines) if market_lines else '暂无市场指数数据。'}\n\n"
         "组合表现\n"
-        f"组合当前市值：{portfolio.get('total_value')}，"
-        f"收益率：{portfolio.get('profit_rate')}。\n\n"
+        f"{portfolio_line}"
         "自选基金表现\n"
         f"当前自选基金数量：{data.get('watchlist_count', 0)}，"
         f"已有评分数量：{data.get('score_count', 0)}。\n\n"
@@ -109,11 +119,19 @@ def collect_daily_report_data(db: Session) -> dict:
             "gap_count": data_health["gap_count"],
         },
         "portfolio_overview": {
+            "as_of": portfolio["as_of"],
+            "valuation_status": portfolio["valuation_status"],
+            "is_complete": portfolio["is_complete"],
+            "known_value": float(portfolio["known_value"]),
             "total_value": float(portfolio["total_value"]) if portfolio["total_value"] is not None else None,
             "total_cost": float(portfolio["total_cost"]) if portfolio["total_cost"] is not None else None,
             "profit_amount": float(portfolio["profit_amount"]) if portfolio["profit_amount"] is not None else None,
             "profit_rate": float(portfolio["profit_rate"]) if portfolio["profit_rate"] is not None else None,
             "position_count": len(portfolio["positions"]),
+            "missing_price_assets": [
+                {"asset_code": item["asset_code"], "reason": item["reason"]}
+                for item in portfolio["missing_price_assets"][:20]
+            ],
         },
         "top_scores": [
             {

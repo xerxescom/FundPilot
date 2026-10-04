@@ -42,11 +42,28 @@
     </div>
 
     <div class="section metric-grid">
-      <MetricCard label="当前市值" :value="money(overview?.total_value)" />
+      <MetricCard
+        label="当前市值"
+        :value="overview && !overview.is_complete ? money(overview.known_value) : money(overview?.total_value)"
+        :hint="overview && !overview.is_complete ? '估值不完整（已知部分）' : ''"
+      />
       <MetricCard label="投入成本" :value="money(overview?.total_cost)" />
-      <MetricCard label="收益金额" :value="money(overview?.profit_amount)" />
+      <MetricCard
+        label="收益金额"
+        :value="money(overview?.profit_amount)"
+        :hint="overview && overview.profit_amount === null && overview.missing_cost_assets.length ? '缺少成本信息' : ''"
+      />
       <MetricCard label="收益率" :value="pct(overview?.profit_rate)" />
     </div>
+    <el-alert
+      v-if="valuationWarning"
+      class="section alert-item"
+      type="warning"
+      :closable="false"
+      show-icon
+      title="组合估值不完整，整体盈亏暂不可用"
+      :description="valuationWarning"
+    />
 
     <div class="section panel">
       <h2 class="section-title">基金拟买入模拟</h2>
@@ -71,7 +88,11 @@
       <div class="metric-grid">
         <MetricCard label="持仓数量" :value="diagnosis?.summary.position_count ?? 0" />
         <MetricCard label="最大持仓占比" :value="pct(diagnosis?.summary.max_weight)" />
-        <MetricCard label="近 1 月回撤" :value="pct(diagnosis?.summary.drawdown_1m)" />
+        <MetricCard
+          label="近 1 月回撤（当前持仓模拟）"
+          :value="pct(diagnosis?.summary.drawdown_1m)"
+          :hint="diagnosis?.summary.drawdown_basis?.window || ''"
+        />
         <MetricCard label="组合收益率" :value="pct(diagnosis?.summary.profit_rate)" />
       </div>
       <el-alert v-for="risk in diagnosis?.risk_items || []" :key="risk.title" class="alert-item" :type="risk.level === 'medium' ? 'warning' : 'info'" :closable="false" :title="risk.title" :description="risk.description" />
@@ -87,6 +108,12 @@
           <el-table-column prop="asset_name" label="名称" min-width="140" />
           <el-table-column prop="holding_share" label="持有数量" />
           <el-table-column prop="latest_price" label="最新价格/净值" />
+          <el-table-column label="行情日期">
+            <template #default="{ row }">
+              <el-tag v-if="row.missing_reason" type="warning" size="small">缺失</el-tag>
+              <span v-else>{{ dateText(row.price_date) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="current_value" label="当前市值" />
           <el-table-column label="收益率"><template #default="{ row }">{{ pct(row.profit_rate) }}</template></el-table-column>
           <el-table-column label="操作" width="90"><template #default="{ row }"><el-button link type="danger" @click="deletePosition(row.id)">删除</el-button></template></el-table-column>
@@ -138,13 +165,13 @@ import type { EChartsOption } from "echarts";
 import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "../api/fundpilot";
-import { money, pct } from "../api/format";
+import { dateText, money, pct } from "../api/format";
 import type { Asset, HoldingScreenshotDraft, PortfolioBuySimulation, PortfolioDiagnosis, PortfolioOverview, WatchlistItem } from "../api/types";
 import ChartBox from "../components/ChartBox.vue";
 import MetricCard from "../components/MetricCard.vue";
 
 const ASSET_LABEL: Record<string, string> = { fund: "基金", stock: "股票", etf: "ETF" };
-const TRADE_LABEL: Record<string, string> = { buy: "买入", sell: "卖出", subscription: "申购", redemption: "赎回" };
+const TRADE_LABEL: Record<string, string> = { buy: "买入", sell: "卖出", subscription: "申购", redemption: "赎回", opening: "期初" };
 const loading = ref(false);
 const overview = ref<PortfolioOverview | null>(null);
 const diagnosis = ref<PortfolioDiagnosis | null>(null);
@@ -172,15 +199,35 @@ const positionRows = computed(() => (overview.value?.positions || []).map((item)
   asset_name: item.asset_name || item.fund_name || "",
   holding_share: item.position.holding_share,
   latest_price: item.latest_price ?? item.latest_nav,
+  price_date: item.price_date,
+  missing_reason: item.missing_reason,
   current_value: item.current_value,
   profit_rate: item.profit_rate,
 })));
+const valuationWarning = computed(() => {
+  const data = overview.value;
+  if (!data || data.is_complete) return "";
+  return data.missing_price_assets
+    .map((item) => `${item.asset_name || item.asset_code}：${item.reason}`)
+    .join("；");
+});
 const transactionRows = computed(() => transactions.value.map((item) => {
   const assetType = String(item.asset_type || "fund");
   const assetCode = String(item.asset_code || item.fund_code || "");
   return { ...item, asset_code: assetCode, asset_type_label: ASSET_LABEL[assetType] || assetType, asset_name: nameMap.value[assetCode] || "", trade_type_label: TRADE_LABEL[String(item.trade_type)] || item.trade_type };
 }));
-const pieOption = computed<EChartsOption>(() => ({ tooltip: { trigger: "item" }, series: [{ type: "pie", radius: ["45%", "70%"], data: positionRows.value.map((row) => ({ name: row.asset_name ? `${row.asset_name} (${row.asset_code})` : row.asset_code, value: row.current_value || 0 })) }] }));
+const pieOption = computed<EChartsOption>(() => ({
+  tooltip: { trigger: "item" },
+  series: [
+    {
+      type: "pie",
+      radius: ["45%", "70%"],
+      data: positionRows.value
+        .filter((row) => row.current_value !== null && row.current_value !== undefined)
+        .map((row) => ({ name: row.asset_name ? `${row.asset_name} (${row.asset_code})` : row.asset_code, value: row.current_value || 0 })),
+    },
+  ],
+}));
 
 async function load() {
   loading.value = true;

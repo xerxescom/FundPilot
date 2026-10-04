@@ -106,6 +106,12 @@ def ensure_schema_compatibility() -> None:
                 "asset_code": "VARCHAR(30)",
             },
         },
+        "task_run_log": {
+            "columns": columns_for("task_run_log"),
+            "missing": {
+                "result_json": "JSON",
+            },
+        },
     }
 
     with engine.begin() as conn:

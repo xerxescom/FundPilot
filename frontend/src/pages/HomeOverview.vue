@@ -148,7 +148,7 @@ const GROUP_LABEL: Record<string, string> = {
   drawdown: "回撤超阈值",
   score_drop: "评分明显下降",
   position_weight: "持仓集中度过高",
-  portfolio_drawdown: "组合整体回撤",
+  portfolio_drawdown: "组合整体回撤（当前持仓模拟）",
 };
 
 const router = useRouter();

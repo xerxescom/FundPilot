@@ -1,5 +1,6 @@
+import json
 from time import perf_counter
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -8,19 +9,57 @@ from app.db.models import TaskRunLog
 
 T = TypeVar("T")
 
+STATUS_SUCCESS = "success"
+STATUS_PARTIAL_SUCCESS = "partial_success"
+STATUS_FAILED = "failed"
 
-def _is_failed_result(value: object) -> bool:
-    if isinstance(value, str):
-        return value.startswith("failed:")
-    if isinstance(value, dict):
-        return value.get("status") == "failed"
-    return False
+_FAILED_STRINGS = {"failed", "error"}
 
 
-def result_counts(result: object) -> tuple[int | None, int]:
-    success_count = len(result) if isinstance(result, (list, dict)) else None
-    failure_count = sum(1 for value in result.values() if _is_failed_result(value)) if isinstance(result, dict) else 0
-    return success_count, failure_count
+def summarize_result(result: object) -> tuple[int | None, int, int]:
+    """Count per-item success / failure / skipped for a task result payload."""
+    if isinstance(result, (list, tuple)):
+        return len(result), 0, 0
+    if not isinstance(result, dict):
+        return None, 0, 0
+    success = failure = skipped = 0
+    for value in result.values():
+        if isinstance(value, dict):
+            status = value.get("status")
+            if status == "skipped":
+                skipped += 1
+            elif status is None or status in {"success", "ok"}:
+                success += 1
+            else:
+                failure += 1
+        elif isinstance(value, str):
+            if value.startswith("failed:") or value in _FAILED_STRINGS:
+                failure += 1
+            elif value == "skipped":
+                skipped += 1
+            else:
+                success += 1
+        else:
+            success += 1
+    return success, failure, skipped
+
+
+def derive_task_status(success_count: int | None, failure_count: int, skipped_count: int = 0) -> str:
+    if failure_count and (success_count or skipped_count):
+        return STATUS_PARTIAL_SUCCESS
+    if failure_count:
+        return STATUS_FAILED
+    return STATUS_SUCCESS
+
+
+def serialize_result_payload(result: object) -> Any | None:
+    """Normalize a task result into a JSON-safe payload for structured storage."""
+    if result is None:
+        return None
+    try:
+        return json.loads(json.dumps(result, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):
+        return {"repr": str(result)[:2000]}
 
 
 def record_task_log(
@@ -31,6 +70,7 @@ def record_task_log(
     success_count: int | None = None,
     failure_count: int | None = None,
     message: str | None = None,
+    result_json: Any | None = None,
 ) -> TaskRunLog:
     log = TaskRunLog(
         task_name=task_name,
@@ -39,6 +79,7 @@ def record_task_log(
         success_count=success_count,
         failure_count=failure_count,
         message=message,
+        result_json=result_json,
     )
     db.add(log)
     db.commit()
@@ -54,6 +95,7 @@ def update_task_log(
     success_count: int | None = None,
     failure_count: int | None = None,
     message: str | None = None,
+    result_json: Any | None = None,
 ) -> TaskRunLog:
     log = db.get(TaskRunLog, log_id)
     if not log:
@@ -63,6 +105,7 @@ def update_task_log(
     log.success_count = success_count
     log.failure_count = failure_count
     log.message = message
+    log.result_json = result_json
     db.commit()
     db.refresh(log)
     return log
@@ -76,21 +119,23 @@ def run_logged(db: Session, task_name: str, fn: Callable[[], T]) -> T:
         record_task_log(
             db,
             task_name=task_name,
-            status="failed",
+            status=STATUS_FAILED,
             duration_ms=int((perf_counter() - started) * 1000),
             message=str(exc),
+            result_json={"error": str(exc)},
         )
         raise
 
-    success_count, failure_count = result_counts(result)
+    success_count, failure_count, skipped_count = summarize_result(result)
     record_task_log(
         db,
         task_name=task_name,
-        status="success",
+        status=derive_task_status(success_count, failure_count, skipped_count),
         duration_ms=int((perf_counter() - started) * 1000),
         success_count=success_count,
         failure_count=failure_count,
         message=str(result)[:2000],
+        result_json=serialize_result_payload(result),
     )
     return result
 

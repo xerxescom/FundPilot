@@ -61,20 +61,34 @@ def _nav_dates(db: Session, fund_code: str) -> list[date]:
     )
 
 
+def _log_result_payload(log: TaskRunLog) -> object | None:
+    """Prefer the structured result; fall back to legacy parseable message text."""
+    if log.result_json is not None:
+        return log.result_json
+    if not log.message:
+        return None
+    text = log.message.lstrip()
+    if not text.startswith(("{", "[")):
+        return None
+    try:
+        return ast.literal_eval(text)
+    except (SyntaxError, ValueError):
+        return None
+
+
 def _latest_sync_status(db: Session, fund_code: str) -> tuple[str | None, str | None, date | None]:
     logs = db.scalars(
         select(TaskRunLog)
-        .where(TaskRunLog.task_name.in_(["update_fund_nav", "manual_sync_watchlist_nav"]))
+        .where(
+            TaskRunLog.task_name.in_(
+                ["update_fund_nav", "manual_sync_watchlist_nav", "queued_sync_watchlist_nav"]
+            )
+        )
         .order_by(TaskRunLog.created_at.desc())
         .limit(20)
     ).all()
     for log in logs:
-        if not log.message or fund_code not in log.message:
-            continue
-        try:
-            data = ast.literal_eval(log.message)
-        except (SyntaxError, ValueError):
-            continue
+        data = _log_result_payload(log)
         if isinstance(data, dict) and fund_code in data:
             value = data[fund_code]
             if isinstance(value, dict):

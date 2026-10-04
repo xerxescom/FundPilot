@@ -24,6 +24,7 @@ function statusText(value: unknown): string {
   if (value.startsWith("failed:") || value === "error") return "失败";
   if (value === "invalid" || value === "invalid_data") return "数据质量异常";
   if (value === "failed") return "失败";
+  if (value === "partial_success") return "部分成功";
   if (value === "skipped") return "已跳过";
   if (value === "queued") return "排队中";
   if (value === "running") return "执行中";

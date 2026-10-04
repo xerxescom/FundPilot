@@ -93,6 +93,13 @@ interface AvailableTask {
   scenario: string;
 }
 
+const STATUS_LABEL: Record<string, string> = {
+  success: "成功",
+  partial_success: "部分成功",
+  failed: "失败",
+  queued: "排队中",
+  running: "执行中",
+};
 const health = ref<DataHealth | null>(null);
 const tasks = ref<AvailableTask[]>([]);
 const selectedTask = ref("");
@@ -115,7 +122,10 @@ async function load() {
     const [healthData, taskData, logData] = await Promise.all([api.dataHealth(), api.availableTasks(), api.taskLogs()]);
     health.value = healthData;
     tasks.value = taskData as AvailableTask[];
-    logs.value = logData as Array<Record<string, unknown>>;
+    logs.value = (logData as Array<Record<string, unknown>>).map((item) => ({
+      ...item,
+      status: STATUS_LABEL[String(item.status)] || item.status,
+    }));
     selectedTask.value ||= tasks.value[0]?.task_name || "";
     hasLoadedOnce.value = true;
   } finally {

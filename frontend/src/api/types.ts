@@ -184,9 +184,14 @@ export interface PortfolioDiagnosis {
   summary: {
     position_count: number;
     total_value?: Nullable<number>;
+    known_value?: Nullable<number>;
+    is_complete?: boolean;
+    valuation_status?: "complete" | "partial" | "empty";
+    missing_price_count?: number;
     profit_rate?: Nullable<number>;
     max_weight?: Nullable<number>;
     drawdown_1m?: Nullable<number>;
+    drawdown_basis?: Nullable<DrawdownBasis>;
   };
   risk_items: RiskItem[];
   observation: string;
@@ -272,13 +277,41 @@ export interface Indicator {
   win_rate_1y?: Nullable<number>;
 }
 
+export interface MissingAsset {
+  asset_type: string;
+  asset_code: string;
+  asset_name?: Nullable<string>;
+  reason: string;
+}
+
+export interface DrawdownBasis {
+  basis: string;
+  label: string;
+  window: string;
+  window_days: number;
+  aligned_days: number;
+  included_asset_count: number;
+  excluded_asset_codes: string[];
+  start_date?: Nullable<string>;
+  end_date?: Nullable<string>;
+}
+
 export interface PortfolioOverview {
-  total_value: number;
+  as_of: string;
+  price_as_of?: Nullable<string>;
+  valuation_status: "complete" | "partial" | "empty";
+  is_complete: boolean;
+  known_value: number;
+  priced_position_count: number;
+  missing_price_assets: MissingAsset[];
+  missing_cost_assets: MissingAsset[];
+  total_value?: Nullable<number>;
   total_cost?: Nullable<number>;
   profit_amount?: Nullable<number>;
   profit_rate?: Nullable<number>;
   max_weight?: Nullable<number>;
   drawdown_1m?: Nullable<number>;
+  drawdown_basis?: Nullable<DrawdownBasis>;
   positions: Array<{
     position: {
       id: number;
@@ -293,6 +326,9 @@ export interface PortfolioOverview {
     };
     latest_nav?: Nullable<number>;
     latest_price?: Nullable<number>;
+    price_date?: Nullable<string>;
+    price_source?: Nullable<string>;
+    missing_reason?: Nullable<string>;
     asset_code?: Nullable<string>;
     asset_type: "fund" | "stock" | "etf";
     asset_name?: Nullable<string>;

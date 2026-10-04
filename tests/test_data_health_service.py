@@ -1,8 +1,8 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from app.db.models import AIReport, FundIndicator, FundNav, FundScore, Watchlist
-from app.services.data_health_service import data_health_overview
+from app.db.models import AIReport, FundIndicator, FundNav, FundScore, TaskRunLog, Watchlist
+from app.services.data_health_service import data_health_overview, fund_data_health
 
 
 def test_data_health_detects_stale_missing_return_and_pending_indicator(db_session):
@@ -104,3 +104,59 @@ def test_data_health_clears_report_todo_when_report_created_after_score_even_if_
 
     assert overview["pending_report_count"] == 0
     assert "基金解释报告待生成" not in overview["funds"][0]["issues"]
+
+
+def test_sync_status_reads_queued_result_json(db_session):
+    db_session.add(Watchlist(fund_code="000001", fund_name="测试基金", is_active=True))
+    db_session.add(
+        TaskRunLog(
+            task_name="queued_sync_watchlist_nav",
+            status="failed",
+            created_at=datetime(2026, 5, 24, 9, 0),
+            result_json={"000001": {"status": "failed", "quality": {"issues": ["全部数据源同步失败"]}}},
+        )
+    )
+    db_session.commit()
+
+    health = fund_data_health(db_session, "000001", today=date(2026, 5, 25))
+
+    assert health["latest_sync_status"] == "failed"
+    assert "全部数据源同步失败" in health["latest_failure_reason"]
+    assert health["latest_sync_date"] == date(2026, 5, 24)
+
+
+def test_sync_status_prefers_result_json_over_truncated_message(db_session):
+    db_session.add(Watchlist(fund_code="000001", fund_name="测试基金", is_active=True))
+    truncated = ("x" * 1990 + str({"000001": {"status": "success"}}))[:2000]
+    db_session.add(
+        TaskRunLog(
+            task_name="manual_sync_watchlist_nav",
+            status="success",
+            message=truncated,
+            result_json={"000001": {"status": "success"}},
+            created_at=datetime(2026, 5, 24, 9, 0),
+        )
+    )
+    db_session.commit()
+
+    health = fund_data_health(db_session, "000001", today=date(2026, 5, 25))
+
+    assert health["latest_sync_status"] == "success"
+
+
+def test_sync_status_legacy_message_fallback_still_works(db_session):
+    db_session.add(Watchlist(fund_code="000001", fund_name="测试基金", is_active=True))
+    db_session.add(
+        TaskRunLog(
+            task_name="manual_sync_watchlist_nav",
+            status="success",
+            message=str({"000001": {"status": "success"}}),
+            created_at=datetime(2026, 5, 24, 9, 0),
+        )
+    )
+    db_session.commit()
+
+    health = fund_data_health(db_session, "000001", today=date(2026, 5, 25))
+
+    assert health["latest_sync_status"] == "success"
+    assert health["latest_sync_date"] == date(2026, 5, 24)

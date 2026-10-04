@@ -23,6 +23,10 @@ def calculate_indicators_from_nav(nav_df: pd.DataFrame, calc_date: date | None =
         raise ValueError("NAV data has no valid rows")
 
     calc_ts = pd.Timestamp(calc_date) if calc_date else df["nav_date"].max()
+    # Truncate before any calculation so historical results never read future rows.
+    df = df[df["nav_date"] <= calc_ts].copy()
+    if df.empty:
+        raise ValueError("计算日期之前没有可用净值")
     current_nav = df.iloc[-1]["unit_nav"]
 
     def period_return(days: int) -> float | None:

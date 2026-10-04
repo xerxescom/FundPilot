@@ -8,7 +8,15 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.services import alert_service, holding_service, indicator_service, market_service, nav_service, score_service
 from app.services.ai.report_service import generate_daily_report
-from app.services.task_log_service import record_task_log, result_counts, run_logged, update_task_log
+from app.services.task_log_service import (
+    STATUS_FAILED,
+    derive_task_status,
+    record_task_log,
+    run_logged,
+    serialize_result_payload,
+    summarize_result,
+    update_task_log,
+)
 
 
 def _task_factories(db: Session) -> dict[str, Callable[[], object]]:
@@ -52,25 +60,27 @@ def run_queued_task(log_id: int, task_name: str) -> None:
     try:
         update_task_log(db, log_id, status="running", message="任务执行中")
         result = _task_fn(db, task_name)()
-        success_count, failure_count = result_counts(result)
+        success_count, failure_count, skipped_count = summarize_result(result)
         update_task_log(
             db,
             log_id,
-            status="success",
+            status=derive_task_status(success_count, failure_count, skipped_count),
             duration_ms=int((perf_counter() - started) * 1000),
             success_count=success_count,
             failure_count=failure_count,
             message=str(result)[:2000],
+            result_json=serialize_result_payload(result),
         )
     except Exception as exc:
         update_task_log(
             db,
             log_id,
-            status="failed",
+            status=STATUS_FAILED,
             duration_ms=int((perf_counter() - started) * 1000),
             success_count=0,
             failure_count=1,
             message=str(exc),
+            result_json={"error": str(exc)},
         )
     finally:
         db.close()

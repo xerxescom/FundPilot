@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,7 +27,7 @@ class PortfolioTransactionCreate(BaseModel):
     asset_code: str | None = None
     asset_type: str = Field(default="fund", pattern="^(fund|stock|etf)$")
     trade_date: date
-    trade_type: str = Field(default="buy", pattern="^(buy|sell|subscription|redemption)$")
+    trade_type: str = Field(default="buy", pattern="^(buy|sell|subscription|redemption|opening)$")
     amount: Decimal
     nav: Decimal
     share: Decimal | None = None
@@ -87,6 +88,9 @@ class PortfolioSummary(BaseModel):
     position: PortfolioOut
     latest_nav: Decimal | None
     latest_price: Decimal | None = None
+    price_date: date | None = None
+    price_source: str | None = None
+    missing_reason: str | None = None
     asset_code: str | None = None
     asset_type: str = "fund"
     asset_name: str | None = None
@@ -95,13 +99,43 @@ class PortfolioSummary(BaseModel):
     profit_rate: Decimal | None
 
 
+class MissingAsset(BaseModel):
+    asset_type: str
+    asset_code: str
+    asset_name: str | None = None
+    reason: str
+
+
+class DrawdownBasis(BaseModel):
+    """Basis of the drawdown number: a simulation over current holdings, not account history."""
+
+    basis: str = "current_holdings_simulation"
+    label: str = "当前持仓历史模拟"
+    window: str
+    window_days: int
+    aligned_days: int
+    included_asset_count: int
+    excluded_asset_codes: list[str] = Field(default_factory=list)
+    start_date: date | None = None
+    end_date: date | None = None
+
+
 class PortfolioOverview(BaseModel):
-    total_value: Decimal
+    as_of: date
+    price_as_of: date | None = None
+    valuation_status: Literal["complete", "partial", "empty"]
+    is_complete: bool
+    known_value: Decimal
+    priced_position_count: int
+    missing_price_assets: list[MissingAsset] = Field(default_factory=list)
+    missing_cost_assets: list[MissingAsset] = Field(default_factory=list)
+    total_value: Decimal | None
     total_cost: Decimal | None
     profit_amount: Decimal | None
     profit_rate: Decimal | None
     max_weight: Decimal | None = None
     drawdown_1m: Decimal | None = None
+    drawdown_basis: DrawdownBasis | None = None
     positions: list[PortfolioSummary]
 
 
