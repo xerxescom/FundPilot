@@ -14,10 +14,10 @@ FundPilot 使用 SQLAlchemy ORM 和 Alembic 管理数据库结构。开发期可
 - `portfolio_position`：本地汇总持仓；保留 `fund_code` 兼容历史数据，新增 `asset_type` 与 `asset_code` 统一表示基金、股票和 ETF。
 - `portfolio_transaction`：统一交易流水，支持买入、卖出、申购、赎回、红利再投、拆分与期初事件；按资产类型重算剩余成本与数量，卖出时确定性写入 `realized_pnl`（已实现盈亏）；`external_ref`（券商编号或内容哈希，唯一索引）、`source`、`import_batch_id` 支持去重与批次追溯。
 - `portfolio_cash_event`：账户级现金事件（出入金/分红/利息/费用/调整/期初现金），金额带符号；现金余额不落库，按事件 + 交易现金流推导。
-- `portfolio_import_batch`：CSV 导入批次（来源、文件指纹、列映射、导入/重复/跳过/错误计数、失败原因），导入行通过 `import_batch_id` 关联。
+- `portfolio_import_batch`：CSV 导入批次（来源、文件指纹、列映射、导入/重复/跳过/错误计数、失败原因），导入行通过 `import_batch_id` 关联；`0010_import_batch_rollback` 新增 `rolled_back_at`/`rollback_reason`：整批回滚会删除该批次的交易与现金事件、按剩余流水重建持仓并把批次标记为 `rolled_back`（导入时为保留手工持仓而物化的 `opening` 事件会保留；删除行同时释放 `external_ref` 唯一索引，同一文件可重新导入）。
 - `alert_event`：风险预警，包含未读、已读、已处理、忽略等状态。
 - `ai_report`：日报和基金解释；`batch_id`/`trade_date` 关联每日批次，`(report_type, batch_id)` 唯一约束保证同一批次只有一份日报。
-- `market_index_daily`：市场指数数据。
+- `market_index_daily`：市场指数数据；账户页的基准对比（默认 `sh000300`，可用 `BENCHMARK_INDEX_CODE` 配置）直接读取该表，需先在市场页同步。
 - `task_run_log`：同步、计算、报告生成等任务日志；`result_json` 保存结构化子项结果，`batch_id` 关联所属批次。
 - `task_batch`：每日更新批次（幂等键 `daily_update:{交易日}`、状态、计数、覆盖率、租约与心跳）。
 - `task_batch_item`：批次步骤项（步骤、资产、状态含 `pending` 暂未发布与 `interrupted` 中断、错误分类、重试次数、租约）。
@@ -29,3 +29,4 @@ FundPilot 使用 SQLAlchemy ORM 和 Alembic 管理数据库结构。开发期可
 - 正式环境：使用 Alembic 迁移，避免隐式改表。
 - 数据源可能延迟或字段变化，业务服务需要保留空值和失败提示。
 - 从旧版本升级时，执行 `uv run alembic upgrade head`；`0006_unified_assets` 会将已有基金持仓和交易回填为 `asset_type=fund`、`asset_code=fund_code`。
+- 仅新增列的迁移（0002/0006/0007/0008/0010）按约定在降级时保留列，避免破坏性丢失；`scripts/verify_migrations.py` 的降级断言因此回退到 `0008_task_batch` 而不是 `-1`，head 版本由 alembic 脚本目录动态推导。

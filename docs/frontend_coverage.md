@@ -5,18 +5,24 @@ Vue 前端位于 `frontend/`，是 FundPilot 的唯一前端工作台。所有�
 | Vue 路由 | 主要 API | 覆盖内容 |
 | --- | --- | --- |
 | `/` | `/api/v1/dashboard/today` | 今日待办、关键风险、数据状态、未读预警、日报摘要、市场概览 |
-| `/data-health` | `/api/v1/data/health`, `/api/v1/data/reconcile/{fund_code}` | 健康指标、基金明细、数据源对账 |
-| `/market` | `/api/v1/market/context`, `/api/v1/market/sync` | 指数指标卡、市场表、同步按钮 |
+| `/data-health` | `/api/v1/data/health`, `/api/v1/data/reconcile/{fund_code}` | 健康指标、基金明细、数据源对账（结构化差异表：日期/双源净值/差值/结论标签） |
+| `/market` | `/api/v1/market/context`, `/api/v1/market/sync` | 指数指标卡、市场表、同步按钮；未同步时给出可操作空态 |
 | `/watchlist` | `/api/v1/watchlist`, `/api/v1/funds/{code}/analysis-status`, `/api/v1/funds/{code}/analyze` | 添加、列表、移除、分析状态、一键分析 |
-| `/portfolio` | `/api/v1/portfolio/*`, `/api/v1/portfolio/diagnosis` | 买入记录、持仓汇总、组合指标、持仓饼图、组合诊断 |
-| `/funds/:fundCode?` | `/api/v1/funds/{code}/*` | 基金档案、分析流程、净值/回撤/涨跌图、指标和评分 |
+| `/portfolio` | `/api/v1/portfolio/*`, `/api/v1/portfolio/diagnosis` | 买入记录、持仓汇总、组合指标、持仓饼图、组合诊断；账户面板含 TWR/XIRR 收益口径、基准对比与视图切换；CSV 导入批次支持整批回滚 |
+| `/funds/:fundCode?` | `/api/v1/funds/{code}/*` | 基金档案、分析流程、净值/回撤/涨跌图、指标和评分；局部板块失败时给出可重试提示而不清空页面 |
 | `/compare` | `/api/v1/funds/compare`, `/api/v1/research/*` | 2-5 只基金对比、风险收益散点、行业汇总 |
-| `/scores` | `/api/v1/recommendations/top` | 评级筛选、最低分筛选、评分表、排行图 |
-| `/score-trend` | `/api/v1/scores/trend/{fund_code}` | 单基金评分历史、趋势图 |
+| `/scores` | `/api/v1/scores/strategies`, `/api/v1/scores/top` | 评级筛选、最低分筛选、评分表、排行图；空数据与筛选为空分别提示 |
+| `/score-trend` | `/api/v1/scores/trend/{fund_code}` | 单基金评分历史、趋势图；无历史时给出可重试空态 |
 | `/correlation` | `/api/v1/correlation/*` | 相关矩阵、高相关组合、两基金收益序列、生成相关性预警 |
 | `/reports/daily` | `/api/v1/reports/daily`, `/api/v1/reports/latest`, `/api/v1/reports/ollama/status` | 生成日报、最新日报、Ollama 状态 |
 | `/reports/history` | `/api/v1/reports/history` | 历史日报选择、报告内容、输入摘要 |
 | `/tasks` | `/api/v1/tasks/*`, `/api/v1/data/health` | 快捷任务、按名称运行、任务结果、最近日志 |
+
+## 通用交互约定
+
+- 共享组件：`EmptyState`（空态 + 可选操作按钮）与 `ErrorState`（错误态 + 重试）覆盖主要页面；`ReconcileResult` 渲染数据源对账差异表。
+- 页面自建错误态时通过 `skipErrorToast` 关闭全局 toast，避免重复提示（见 `frontend/src/api/client.ts`）。
+- 404 表示"尚未分析/暂无数据"，是正常状态；其他错误才计入失败提示（如基金详情的分区警示条）。
 
 ## 验收步骤
 

@@ -1,11 +1,14 @@
 """备份 PostgreSQL 数据库（pg_dump custom 格式），输出文件大小与 SHA256。
 
 默认通过 Docker 容器执行 pg_dump（与 docker-compose 部署一致）；
-本机装有 pg_dump 时可用 --local 直接调用。
+本机装有 pg_dump 时可用 --local 直接调用。备份成功后可只保留最近 N 份（--keep）。
 
 Run:
     python scripts/backup_database.py
+    python scripts/backup_database.py --keep 14
     python scripts/backup_database.py --container fundpilot_postgres --database fund_watcher --out-dir backups
+
+定时备份建议交给宿主 cron / Windows 任务计划（后端镜像不含 pg_dump，见 README 的运维章节）。
 """
 
 from __future__ import annotations
@@ -34,7 +37,29 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--user", default=url.username or "postgres", help="数据库用户")
     parser.add_argument("--out-dir", default="backups", help="备份输出目录")
     parser.add_argument("--local", action="store_true", help="使用本机 pg_dump 而不是 Docker")
+    parser.add_argument(
+        "--keep",
+        type=int,
+        default=14,
+        help="备份成功后只保留最近 N 份（0 = 全部保留，默认 14）",
+    )
     return parser.parse_args()
+
+
+def prune_backups(out_dir: Path, database: str, keep: int) -> list[Path]:
+    """删除超出保留份数的旧备份；文件名带时间戳，按名称排序即按时间排序。"""
+    if keep <= 0:
+        return []
+    candidates = sorted(out_dir.glob(f"{database}_*.dump"))
+    stale = candidates[:-keep] if len(candidates) > keep else []
+    removed: list[Path] = []
+    for path in stale:
+        try:
+            path.unlink()
+            removed.append(path)
+        except OSError as exc:  # 单个文件删不掉不应让备份失败
+            print(f"清理失败（已跳过）：{path.name} — {exc}")
+    return removed
 
 
 def _container_running(container: str) -> bool:
@@ -89,6 +114,9 @@ def main() -> int:
     size_mb = target.stat().st_size / (1024 * 1024)
     print(f"完成：{target.name}（{size_mb:.2f} MB）")
     print(f"SHA256：{_sha256(target)}")
+    removed = prune_backups(out_dir, args.database, args.keep)
+    if removed:
+        print(f"按 --keep {args.keep} 清理 {len(removed)} 份旧备份：{'、'.join(path.name for path in removed)}")
     print("提示：升级/恢复演练前请保留该文件，并用 restore_database.py 恢复到独立测试库核对。")
     return 0
 

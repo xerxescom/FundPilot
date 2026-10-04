@@ -22,7 +22,8 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --python 3.12
       - run: uv run ruff check app scripts tests
-      - run: uv run pytest -q
+      # 覆盖率先只做报告（不设 fail-under 阈值），基线稳定后再收紧
+      - run: uv run pytest -q --cov=app --cov-report=term-missing
 
   frontend:
     name: 前端类型检查与构建

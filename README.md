@@ -8,8 +8,9 @@ FundPilot 是一个本地单用户投资驾驶舱。它用 AKShare/Eastmoney 采
 - 自选基金管理：添加、移除、同步单只或全部自选基金，并展示分析状态。
 - 基金分析：净值、回撤、日涨跌幅、收益率、波动率、夏普比率、胜率和评分；基金解释由 AI 单独生成，避免拖慢快速分析。
 - 统一持仓管理：股票、基金和 ETF 共用交易账本，支持买入、卖出、申购、赎回、红利再投、拆分、期初持仓，自动汇总成本并记录已实现盈亏。
-- 券商 CSV 导入：支持中信证券成交明细与资金流水（UTF-8/GBK），自动识别列映射，导入前逐行预览（可导入/重复/疑似重复/错误），重复导入自动跳过并有批次追溯。
-- 现金与账户收益：出入金、分红、利息、费用、期初现金事件；现金余额与账户资产按需推导，展示净投入、累计盈亏、收益率与账户资产曲线，并核对"累计盈亏 = 已实现 + 未实现 + 其他收益"恒等式。
+- 券商 CSV 导入：支持中信证券成交明细与资金流水（UTF-8/GBK），自动识别列映射，导入前逐行预览（可导入/重复/疑似重复/错误），重复导入自动跳过并有批次追溯；已入账批次可**整批回滚**（删除该批流水、确定性重建持仓），回滚后同一文件可重新导入。
+- 现金与账户收益：出入金、分红、利息、费用、期初现金事件；现金余额与账户资产按需推导，展示净投入、累计盈亏、收益率与账户资产曲线，并核对"累计盈亏 = 已实现 + 未实现 + 其他收益"恒等式；另提供 **TWR（时间加权）与 XIRR（资金加权）** 口径剔除出入金时点影响。
+- 基准对比：账户 TWR 曲线对比沪深300（可用 `BENCHMARK_INDEX_CODE` 换基准），输出超额收益、年化、最大回撤、Beta/Alpha 与相关性。
 - 股票/ETF 行情：可从持仓页同步 A 股股票或 ETF 日线，和基金净值一起计算组合市值与回撤。
 - 每日更新批次：一键"更新今日数据"，按依赖推进（行情 → 质量 → 指标 → 评分 → 预警 → 报告），独立 worker 带租约与心跳，中断可恢复，暂未发布与真正失败分开显示。
 - 风险提醒：大跌、回撤、评分下降、持仓集中和高相关重复配置。
@@ -99,11 +100,17 @@ OLLAMA_TIMEOUT=180
 AI_PROVIDER=ollama
 DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=deepseek-v4-flash
+BENCHMARK_INDEX_CODE=sh000300
+LOG_LEVEL=INFO
+LOG_JSON=false
+WORKER_METRICS_PORT=0
 ```
 
 启用在线 DeepSeek 后，将 `AI_PROVIDER=deepseek`，并在本地 `.env` 配置 `DEEPSEEK_API_KEY`。密钥只应保存在后端环境变量中，不要提交到 Git 或浏览器代码。
 
 `ENABLE_SCHEDULER=false` 默认不自动跑定时任务，避免本地启动后立刻拉取外部数据。`AUTO_CREATE_TABLES=true` 仅用于开发期快速启动，正式路径建议执行 Alembic 迁移。
+
+`BENCHMARK_INDEX_CODE` 是账户基准对比使用的指数（默认 `sh000300` 沪深300，需先在市场页同步该指数行情）。`LOG_LEVEL` 控制日志级别，`LOG_JSON=true` 输出 JSON 行便于采集。`WORKER_METRICS_PORT` 默认 0（关闭）——worker 的进程内计数只在需要时暴露（compose 内网固定用 9101，不映射到宿主机）。
 
 ## 开发校验
 
@@ -111,6 +118,7 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 
 ```bash
 .venv\Scripts\python -m pytest
+.venv\Scripts\python -m pytest --cov=app --cov-report=term-missing   # 与 CI 一致（报告，不设阈值）
 .venv\Scripts\ruff.exe check .
 ```
 
@@ -156,10 +164,28 @@ docker compose --env-file .env.docker logs worker --tail 20
 
 ```bash
 python scripts/backup_database.py                                   # 备份（Docker 内的 pg_dump）
+python scripts/backup_database.py --keep 14                         # 备份成功后只保留最近 14 份
 python scripts/restore_database.py backups/fund_watcher_<时间戳>.dump   # 默认恢复到 <库名>_restore_test 并核对
 ```
 
 恢复脚本默认**不会**覆盖当前库；会逐项核对关键表行数与持仓份额/成本合计，输出对平表并以退出码表示结果（`--keep-target` 可保留恢复库人工检查）。建议在每次升级前做一次演练并记录核对结果。
+
+定时备份放在宿主机（后端镜像不含 `pg_dump`，脚本默认经 `docker exec` 调用 postgres 容器）：
+
+```bash
+# Linux cron：每天 03:15
+15 3 * * * cd /opt/FundPilot && .venv/bin/python scripts/backup_database.py --keep 14 >> backups/backup.log 2>&1
+
+# Windows 任务计划
+schtasks /Create /SC DAILY /TN FundPilotBackup /ST 03:15 ^
+  /TR "E:\codeX-worksapce\FundPilot\.venv\Scripts\python.exe E:\codeX-worksapce\FundPilot\scripts\backup_database.py --keep 14"
+```
+
+## 可观测性
+
+- `GET /metrics`（Prometheus 文本格式，仅本机可达、不经 nginx 反代）：HTTP 请求数与耗时（按路由模板打标）、任务运行、批次步骤项结果、数据源请求成败，以及查库得到的批次状态 Gauge。
+- 日志级别与格式由 `LOG_LEVEL` / `LOG_JSON` 控制；worker 可用 `python -m app.worker --healthcheck` 自检数据库连通性。
+- compose 中 backend 健康检查走 `/readyz`（含数据库与迁移版本），worker 走 `--healthcheck`，frontend 走 nginx 探活。
 
 ## 产品边界
 

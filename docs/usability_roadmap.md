@@ -206,7 +206,7 @@ AI 验收样本至少覆盖：缺行情、过期行情、正常比较、评分�
 - 任务 7：新增 `scripts/verify_migrations.py`（临时库上自动验证全新库建库、旧库升级、降级/重升级幂等，13 项检查）；新增 `tests/test_postgres_integration.py`（`postgres` 标记，默认跳过，覆盖迁移后的账本原子性、期初衔接与结构化任务结果）；新增 `.github/workflows/ci.yml`（后端测试与 ruff、前端构建、PostgreSQL 迁移矩阵、浏览器端到端测试）；新增 Playwright 端到端测试（`npm run test:e2e`）覆盖录入交易/失败提示/刷新一致与估值完整性提示；README 补充开发校验与升级发布步骤。
 - 验证：后端 100 项测试通过（含约 24 项新增回归，PostgreSQL 模块默认跳过）；`ruff` 通过；前端 `npm run typecheck`、`npm run build` 与 `npm run test:e2e`（3 项浏览器流程）通过；Alembic 0007 在 Docker PostgreSQL 上验证旧库升级、全新库创建、降级/重升级幂等；回填脚本 dry-run 零写入、apply 核对通过；API 冒烟覆盖“1000+100=1100”、超卖 400 回滚、删除 400 回滚、编辑守卫与诊断契约。
 
-未完成与已知限制：唯一约束 `(asset_type, asset_code)` 待存量去重后再加；已实现盈亏/现金账本、真实账户回撤、股票复权口径标记仍属后续阶段；CI 尚未在 GitHub 远端实际运行过（本地已验证各步骤可执行）。
+未完成与已知限制：唯一约束 `(asset_type, asset_code)` 待存量去重后再加；股票复权口径标记仍属后续阶段；CI 尚未在 GitHub 远端实际运行过（本地已验证各步骤可执行）。后续进展见第 9、10 节。
 
 ## 8. 阶段 B 实施进度（2026-10-04）
 
@@ -220,7 +220,7 @@ AI 验收样本至少覆盖：缺行情、过期行情、正常比较、评分�
 - 备份恢复：`scripts/backup_database.py`（pg_dump custom 格式 + SHA256）与 `scripts/restore_database.py`（默认恢复到独立测试库、逐项核对行数与持仓份额/成本合计、默认拒绝覆盖当前库）；README 与 docs 补充操作流程。
 - 验证：后端 145 项测试通过（新增批次/执行器/worker/日历/接口/健康约 40 项）与 PostgreSQL 集成测试 7 项；ruff、前端 typecheck/build、Playwright 4 条流程（含驾驶舱一键创建批次与幂等）通过；迁移矩阵 28 项检查通过；用真实 akshare 数据完整跑通一次批次（market→alerts→report，状态 success，覆盖率与报告落库正确）；备份恢复演练逐项对平（51,427 条净值、110 条评分、75 份报告、持仓合计一致）；`/livez` 与 `/readyz`（未迁移 503、已迁移 head 200、数据库停机 503 而存活保持 200）验证通过。
 - 部署栈实测（Docker Compose，临时库）：`postgres → migrate（全新库一路升到 0008，退出码 0）→ backend（`AUTO_CREATE_TABLES=false`，schema 完全来自迁移）→ worker / nginx 前端`，全部 healthy；经 nginx 反代创建批次并观察 worker 消费完成；**杀掉 worker → 租约过期后批次显示"中断"（无 worker 存活也能识别）→ 重启 worker 自动重排并恢复成功（market 步骤 retry=1）**；重复点击返回同一批次。
-- 已知限制：本机网络对 docker.io 拉取基础镜像严重限速（可用 `.env.docker` 的 `DOCKER_UV_INDEX_URL`/`DOCKER_NPM_REGISTRY` 或从镜像仓库预拉基础镜像；Docker 内容缓存卡住半截层时重启引擎可解）；登录鉴权与 HTTPS 未做（端口已收回环，远程访问留待下一阶段）；多 worker 并行调优、单资产超时看门狗、报告版本 supersedes 未做。
+- 已知限制：本机网络对 docker.io 拉取基础镜像严重限速（可用 `.env.docker` 的 `DOCKER_UV_INDEX_URL`/`DOCKER_NPM_REGISTRY` 或从镜像仓库预拉基础镜像；Docker 内容缓存卡住半截层时重启引擎可解）；登录鉴权与 HTTPS 未做（端口已收回环，远程访问留待下一阶段）；多 worker 并行调优、单资产超时看门狗、报告版本 supersedes 未做。可观测性（/metrics、结构化日志、worker 探针）已在第 10 节补齐。
 
 ## 9. 阶段 C 核心实施进度（2026-10-04）
 
@@ -231,4 +231,18 @@ AI 验收样本至少覆盖：缺行情、过期行情、正常比较、评分�
 - 现金与账户收益：`portfolio_cash_event` 记录出入金/分红/利息/费用/调整/期初现金（符号自动规范化、期初现金唯一）；现金余额、账户总资产、净投入、累计盈亏、收益率全部按需推导（现金不落库）；账户曲线按"行情日 ∪ 事件日"重放（该日尚无行情用成本估值并标记不完整），起点对齐最早可验证日期；恒等式 `累计盈亏 = 已实现 + 未实现 + 其他收益`（红利再投计入其他收益）在测试中逐分断言，偏差超 0.01 前端提示。
 - 接口与页面：`/portfolio/imports/preview|commit|{id}`、`/portfolio/cash-events`、`/portfolio/account/summary|performance`；持仓页新增 CSV 导入面板与核对对话框、交易记录/现金与事件/导入批次标签页、账户收益指标卡与总资产/净投入双曲线。`portfolio_overview` 契约未改动（评分/预警/报告消费方零影响）。
 - 验证：后端 181 项测试通过（新增账本事件 10、账户口径与曲线 10、CSV 导入 14、API 契约 2），PostgreSQL 集成 8 项；ruff、前端 typecheck/build 通过；Playwright 5 条流程（新增 CSV 导入闭环与"重复导入确认按钮禁用"）；迁移矩阵 40 项（Alembic `0009_portfolio_import`）。
-- 未做与已知限制：TWR/MWR、分红/拆分自动抓取（akshare 端点已具备）、多账户、税费、已入账批次整批回滚、现金事件修改（删后重加）、C1/C5；真实券商样例到手后通过映射界面校准（无需改代码）；无编号文件的内容哈希对"后续文件里真实新增的相同交易"可能误判为重复，用界面上的强制导入处理。
+- 未做与已知限制：分红/拆分自动抓取（akshare 端点已具备）、多账户、税费、现金事件修改（删后重加）、C1/C5；真实券商样例到手后通过映射界面校准（无需改代码）；无编号文件的内容哈希对"后续文件里真实新增的相同交易"可能误判为重复，用界面上的强制导入处理。TWR/XIRR 与已入账批次整批回滚已在第 10 节完成。
+
+## 10. 阶段 C+ 实施进度（2026-10-04，本轮迭代）
+
+本轮主题「从记录到度量」：把收益口径做真、把导入做可撤销、把体验与运维补齐一档。范围经用户确认（四方向精选 6 项）。
+
+- 真实收益口径（TWR + XIRR）：新增 `app/services/return_metrics.py`（几何连乘、年化、XIRR 牛顿法 + 二分兜底与可解释失败状态）；`account_returns()` 从账户曲线推导外部现金流（= 净投入的逐点变化，与账户恒等式同口径，adjustment 等内部收益不误判为现金流），TWR 逐段连乘、XIRR 取投入方视角；`/portfolio/account/summary` 返回 `returns`（不含逐点索引），`/portfolio/account/performance` 返回含 `twr_index` 的完整块；前端账户面板新增 TWR/XIRR 指标卡与 TWR 累计曲线（百分比副轴）。**顺带修复**：未物化的手工/截图持仓在 `trade_date == start` 时被整体漏掉、曲线记 0 的回放 bug（现按日期折入初值或作为有日期的期初事件参与回放）。
+- 收益口径边界：区间不足 30 天不输出年化与 XIRR（状态 `short_window`）；零估值段跳过并记 notes；存在成本估值日时标注精度受影响；XIRR 无解/同号/零天数分别返回状态与中文说明。
+- CSV 导入整批回滚：迁移 `0010_import_batch_rollback` 增加 `rolled_back_at`/`rollback_reason`；`POST /portfolio/imports/{id}/rollback` 在同一事务内删除该批交易与现金事件、按剩余流水确定性重建持仓（自动汇总持仓清空即移除），批次留痕 `rolled_back`；删除行释放 `external_ref` 唯一索引，**同一文件可重新导入**；导入时物化的 `opening` 事件保留（保存导入前手工持仓快照，接口 note 与文档均说明）。前端导入批次页新增回滚按钮（确认框 + 可选原因）。
+- 基准对比：新增 `app/services/benchmark_service.py`，按账户 TWR 指数与指数收盘的**共同交易日**对齐（不做前向填充，缺口计入 coverage），输出累计/超额/年化/波动/最大回撤/Beta/Alpha/相关性；`/portfolio/account/performance` 增加 `benchmark` 块与 `benchmark_index_code`/`include_benchmark` 参数；前端账户面板新增基准指标卡与「资产与净投入 ↔ 累计收益率对比」视图切换，未同步指数时显式降级提示。默认基准 `sh000300`（`BENCHMARK_INDEX_CODE` 可换）。
+- 前端健壮性：新增共享组件 `EmptyState`/`ErrorState`/`ReconcileResult`；数据健康页的对账结果从裸 JSON 改为结构化差异表（日期/双源净值/差值/结论标签 + 计数卡）；评分排行、评分趋势、市场概览、基金对比补齐空态与错误态 + 重试；基金详情不再吞错——404（尚未分析）视为正常状态，其他失败汇总为可重试的分区警示条，净值失败则整页错误态；`skipErrorToast` 让页面自建错误 UI 时不重复弹全局提示。
+- 可观测性：新增 `app/core/metrics.py`（私有 Registry 惰性单例，测试可重置）与 `/metrics` 端点；ASGI 中间件按**路由模板**记录请求数与耗时（跳过探针，避免标签基数爆炸）；业务计数器覆盖任务运行、批次步骤项结果、数据源请求成败；批次状态用 scrape 时查库的 Gauge（跨进程可见，查库失败不影响抓取）；日志支持 `LOG_LEVEL`/`LOG_JSON`；compose 的 backend 健康检查改为 `/readyz`，worker 增加 `--healthcheck` 与内网指标端口（9101，不发布到宿主机），frontend 增加 nginx 探活；`/metrics` 刻意不经 nginx 反代（仅本机可达）。
+- 运维与 CI 硬化：`backup_database.py --keep N`（默认 14）按时间戳清理旧备份，定时备份走宿主 cron / Windows 任务计划（后端镜像不含 pg_dump，README/docs 给出可复制命令）；`verify_migrations.py` 不再硬编码 head（改用 alembic ScriptDirectory 动态推导），降级断言固定到 `0008_task_batch`（列级迁移按约定降级保留列），新增 0010 列检查；CI 增加 `--cov=app` 覆盖率报告（不设 fail-under）；新增 `.github/dependabot.yml`（uv/npm/actions/docker 分组周更）。不做 ESLint 迁移（`vue-tsc` 已覆盖类型检查）。
+- 验证：后端 220 项测试通过（新增 TWR/XIRR 纯函数、账户口径、基准对比、指标、回滚、备份清理等约 30 项）+ PostgreSQL 集成 10 项；ruff 通过；前端 typecheck/build 通过；Playwright 9 条流程（新增对账结构化与失败重试、空态、基金详情分区失败、导入回滚）；迁移矩阵 46 项检查（head 动态推导 + 0010 列 + 降级幂等）；覆盖率基线 79%。
+- 已知限制（本轮新增）：worker 的进程内计数器需要开启 `WORKER_METRICS_PORT` 才能直接抓取（批次状态另有跨进程的查库 Gauge）；基准对比需先同步指数行情，账户区间被性能上限（3 年/1500 点）截断时对比窗口同步截断；XIRR 在区间不足 30 天或现金流同号时不出数（返回状态与说明）；回滚会保留导入时物化的期初流水（数字等价，界面语义由手工持仓变为账本期初）。
