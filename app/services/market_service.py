@@ -6,6 +6,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.metrics import record_data_source_request
 from app.data_source.akshare_client import AkshareFundDataSource
 from app.db.models import MarketIndexDaily, MarketValuationDaily
 from app.services.nav_service import decimal_or_none
@@ -92,15 +93,28 @@ def upsert_market_valuation_rows(db: Session, index_name: str, rows: pd.DataFram
 
 
 def sync_market_index(db: Session, index_code: str, index_name: str) -> int:
-    rows = AkshareFundDataSource().get_market_index_history(index_code)
-    return upsert_market_rows(db, index_name, rows)
+    try:
+        rows = AkshareFundDataSource().get_market_index_history(index_code)
+        count = upsert_market_rows(db, index_name, rows)
+    except Exception:
+        record_data_source_request("akshare", "market_index", "failed")
+        raise
+    record_data_source_request("akshare", "market_index", "success")
+    return count
 
 
 def sync_market_valuation(db: Session, index_code: str, index_name: str) -> int:
-    rows = AkshareFundDataSource().get_market_index_valuation(index_code, index_name)
-    if rows.empty:
-        return 0
-    return upsert_market_valuation_rows(db, index_name, rows)
+    try:
+        rows = AkshareFundDataSource().get_market_index_valuation(index_code, index_name)
+        if rows.empty:
+            record_data_source_request("akshare", "market_valuation", "empty")
+            return 0
+        count = upsert_market_valuation_rows(db, index_name, rows)
+    except Exception:
+        record_data_source_request("akshare", "market_valuation", "failed")
+        raise
+    record_data_source_request("akshare", "market_valuation", "success")
+    return count
 
 
 def sync_market_context(db: Session) -> dict[str, int | str]:

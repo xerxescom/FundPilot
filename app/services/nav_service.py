@@ -8,6 +8,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.metrics import record_data_source_request
 from app.data_source.akshare_client import AkshareFundDataSource
 from app.data_source.eastmoney_client import EastmoneyFundDataSource
 from app.db.models import FundInfo, FundNav, Watchlist
@@ -136,11 +137,15 @@ def fetch_nav_with_fallback(fund_code: str) -> tuple[pd.DataFrame, dict[str, Any
                         "issues": quality["issues"],
                     }
                 )
+                record_data_source_request(
+                    source.source_name, "fund_nav", "success" if quality["valid"] else "invalid"
+                )
                 if quality["valid"]:
                     return rows, {"source": source.source_name, "attempts": attempts, "quality": quality}
                 last_error = ValueError("; ".join(quality["issues"]) or "invalid NAV rows")
             except Exception as exc:
                 last_error = exc
+                record_data_source_request(source.source_name, "fund_nav", "failed")
                 attempts.append(
                     {
                         "source": source.source_name,

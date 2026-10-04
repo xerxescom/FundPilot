@@ -17,6 +17,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.metrics import record_batch_item_outcome
 from app.db.models import TaskBatch, TaskBatchItem
 from app.db.session import SessionLocal
 from app.services import daily_batch_service as batches
@@ -161,6 +162,7 @@ def execute_claimed_item(
     db.flush()
     batches.refresh_batch_status(db, batch)
     db.commit()
+    record_batch_item_outcome(item.step, item.status)
 
 
 def recover_expired_leases(db: Session, now: datetime | None = None) -> dict[str, int]:
@@ -182,6 +184,7 @@ def recover_expired_leases(db: Session, now: datetime | None = None) -> dict[str
         item.lease_expires_at = None
         item.finished_at = now
         touched_batches.add(item.batch_id)
+        record_batch_item_outcome(item.step, "interrupted")
     db.flush()
     for batch_id in touched_batches:
         batch = db.get(TaskBatch, batch_id)
@@ -219,11 +222,13 @@ def requeue_interrupted(db: Session, now: datetime | None = None) -> int:
             item.error_message = None
             item.finished_at = None
             requeued += 1
+            record_batch_item_outcome(item.step, "requeued")
         else:
             item.status = batches.ITEM_FAILED
             item.error_class = "interrupted_max_retries"
             item.error_message = "中断次数超过上限或批次已超出恢复窗口"
             failures += 1
+            record_batch_item_outcome(item.step, "failed")
         touched_batches.add(item.batch_id)
     db.flush()
     for batch_id in touched_batches:

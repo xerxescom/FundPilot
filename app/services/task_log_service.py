@@ -6,6 +6,7 @@ from typing import Any, Callable, TypeVar
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.metrics import record_task_run
 from app.db.models import TaskRunLog
 
 T = TypeVar("T")
@@ -92,6 +93,7 @@ def record_task_log(
     db.add(log)
     db.commit()
     db.refresh(log)
+    record_task_run(task_name, status)
     return log
 
 
@@ -116,6 +118,7 @@ def update_task_log(
     log.result_json = result_json
     db.commit()
     db.refresh(log)
+    record_task_run(log.task_name, status)
     return log
 
 

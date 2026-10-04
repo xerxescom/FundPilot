@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     batch_item_max_retries: int = 3
     batch_recovery_window_days: int = 3
     interrupted_requeue_delay_seconds: int = 30
+    # 日志与可观测性
+    log_level: str = "INFO"
+    log_json: bool = False
+    worker_metrics_port: int = 0  # 0 = 关闭；compose 内网设为 9101，不发布到宿主机
     # worker 心跳与租约
     worker_poll_seconds: float = 2.0
     heartbeat_interval_seconds: int = 15

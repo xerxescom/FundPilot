@@ -60,10 +60,12 @@ services:
     ports:
       - "127.0.0.1:${DOCKER_BACKEND_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/livez', timeout=3)\""]
+      # 就绪探针包含数据库连通与迁移到 head；migrate 已完成，这里不会长期未就绪
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)\""]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   # 独立批次 worker：消费每日更新批次，带租约与心跳
   worker:
@@ -77,10 +79,18 @@ services:
       DATABASE_URL: postgresql+psycopg2://${DOCKER_POSTGRES_USER:-postgres}:${DOCKER_POSTGRES_PASSWORD:-postgres}@postgres:5432/${DOCKER_POSTGRES_DB:-fund_watcher}
       AUTO_CREATE_TABLES: "false"
       OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # 指标只在 compose 内网暴露（不发布端口到宿主机）
+      WORKER_METRICS_PORT: "9101"
     depends_on:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -m app.worker --healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   # 前端静态构建产物由 nginx 托管，并反代 /api 到 backend
   frontend:
@@ -93,6 +103,12 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:${DOCKER_FRONTEND_PORT:-5173}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   postgres_data:
