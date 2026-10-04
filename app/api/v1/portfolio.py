@@ -279,6 +279,16 @@ def account_summary(db: Session = Depends(get_db)):
 
 @router.get("/account/performance")
 def account_performance(
-    start: date | None = None, end: date | None = None, db: Session = Depends(get_db)
+    start: date | None = None,
+    end: date | None = None,
+    benchmark_index_code: str | None = None,
+    include_benchmark: bool = True,
+    db: Session = Depends(get_db),
 ):
-    return account_service.account_performance(db, start=start, end=end)
+    return account_service.account_performance(
+        db,
+        start=start,
+        end=end,
+        include_benchmark=include_benchmark,
+        benchmark_index_code=benchmark_index_code,
+    )

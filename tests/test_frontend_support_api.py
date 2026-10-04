@@ -291,9 +291,15 @@ def test_cash_event_and_account_api_contract(db_session):
     assert summary["net_invested"] == Decimal("1000")
     assert summary["cumulative_pnl"] == Decimal("0.000000")
 
-    performance = account_performance(None, None, db_session)
+    performance = account_performance(None, None, None, True, db_session)
     assert performance["coverage"]["points"] >= 1
     assert performance["basis"] == "account_balance_replay"
+    assert performance["returns"]["basis"] == "twr_daily_linked + xirr_newton"
+    assert "twr_index" in performance["returns"]  # 曲线接口带逐点索引
+    # 无指数行情时基准对比显式降级，不抛错
+    assert performance["benchmark"]["status"] == "no_index_data"
+    assert summary["returns"]["basis"] == "twr_daily_linked + xirr_newton"
+    assert "twr_index" not in summary["returns"]  # 汇总接口不带
 
     assert delete_cash_event(created["id"], db_session) == {"detail": "deleted"}
     assert list_cash_events(None, None, 500, db_session) == []

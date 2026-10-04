@@ -88,7 +88,9 @@
         <MetricCard label="现金余额" :value="money(account?.cash_balance)" />
         <MetricCard label="净投入" :value="money(account?.net_invested)" :hint="`含期初投入 ${money(account?.initial_investment)}`" />
         <MetricCard label="累计盈亏" :value="money(account?.cumulative_pnl)" />
-        <MetricCard label="账户收益率" :value="pct(account?.return_rate)" />
+        <MetricCard label="账户收益率" :value="pct(account?.return_rate)" hint="累计盈亏 / 净投入，含出入金时点影响" />
+        <MetricCard label="时间加权收益率 (TWR)" :value="pct(account?.returns?.twr)" :hint="twrHint" />
+        <MetricCard label="资金加权收益率 (XIRR)" :value="pct(account?.returns?.xirr)" :hint="xirrHint" />
         <MetricCard label="已实现盈亏" :value="money(account?.realized_pnl_total)" />
         <MetricCard label="未实现盈亏" :value="money(account?.unrealized_pnl_total)" />
         <MetricCard label="其他收益" :value="money(account?.other_income_total)" hint="分红 / 利息 / 费用 / 红利再投" />
@@ -110,11 +112,36 @@
         :closable="false"
         :title="note"
       />
+      <el-radio-group v-if="hasBenchmarkSeries" v-model="performanceMode" size="small" class="chart-mode">
+        <el-radio-button value="assets">资产与净投入</el-radio-button>
+        <el-radio-button value="returns">累计收益率对比</el-radio-button>
+      </el-radio-group>
       <div v-if="performance?.points.length" class="performance-chart"><ChartBox :option="performanceOption" /></div>
       <p v-if="performance" class="muted">
         {{ performance.label }}（{{ performance.coverage.start_date }} ~ {{ performance.coverage.end_date }}，
         共 {{ performance.coverage.points }} 个点{{ performance.is_complete ? "" : "；部分日期按成本估值" }}）
       </p>
+      <template v-if="benchmark">
+        <h3 class="section-title">基准对比 · {{ benchmark.index_name }}</h3>
+        <el-alert
+          v-if="benchmark.status !== 'ok'"
+          class="alert-item"
+          type="info"
+          :closable="false"
+          show-icon
+          :title="benchmark.notes[0] || '基准数据不足'"
+          description="在市场概览页同步指数数据后即可对比；也可通过 BENCHMARK_INDEX_CODE 配置其他基准。"
+        />
+        <div v-else class="metric-grid">
+          <MetricCard label="区间收益（账户）" :value="pct(benchmark.metrics.account_cumulative)" :hint="`基准 ${pct(benchmark.metrics.benchmark_cumulative)}`" />
+          <MetricCard label="超额收益" :value="pct(benchmark.metrics.excess_return)" :hint="`${benchmark.coverage.aligned_days} 个共同交易日`" />
+          <MetricCard label="年化收益（账户）" :value="pct(benchmark.metrics.account_annualized)" :hint="`基准 ${pct(benchmark.metrics.benchmark_annualized)}`" />
+          <MetricCard label="最大回撤（账户）" :value="pct(benchmark.metrics.account_max_drawdown)" :hint="`基准 ${pct(benchmark.metrics.benchmark_max_drawdown)}`" />
+          <MetricCard label="Beta" :value="num(benchmark.metrics.beta, 3)" hint="账户对基准的敏感度" />
+          <MetricCard label="Alpha（年化）" :value="pct(benchmark.metrics.alpha)" hint="无风险利率按 0" />
+          <MetricCard label="相关性" :value="num(benchmark.metrics.correlation, 3)" />
+        </div>
+      </template>
     </div>
 
     <div class="section panel">
@@ -334,7 +361,7 @@ import type { EChartsOption } from "echarts";
 import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "../api/fundpilot";
-import { dateText, money, pct } from "../api/format";
+import { dateText, money, num, pct } from "../api/format";
 import type {
   AccountPerformance,
   AccountSummary,
@@ -469,17 +496,86 @@ const reconciliationWarning = computed(() => {
   const diff = account.value?.reconciliation_difference;
   return diff !== null && diff !== undefined && Math.abs(Number(diff)) > 0.01;
 });
-const performanceOption = computed<EChartsOption>(() => ({
-  tooltip: { trigger: "axis" },
-  legend: { data: ["账户总资产", "净投入"] },
-  grid: { left: 60, right: 24, top: 40, bottom: 40 },
-  xAxis: { type: "category", data: performance.value?.points.map((point) => point.point_date) || [] },
-  yAxis: { type: "value" },
-  series: [
-    { name: "账户总资产", type: "line", showSymbol: false, data: performance.value?.points.map((point) => Number(point.total_assets)) || [] },
-    { name: "净投入", type: "line", showSymbol: false, data: performance.value?.points.map((point) => Number(point.net_invested)) || [] },
-  ],
-}));
+const XIRR_STATUS_LABEL: Record<string, string> = {
+  ok: "",
+  insufficient_flows: "现金流不足，无法求解",
+  all_same_sign: "现金流方向单一，无法求解",
+  no_solution: "在合理区间内无解",
+  zero_days: "起止日期相同，无法年化",
+  short_window: "区间不足 30 天，年化不具参考意义",
+};
+const twrHint = computed(() => {
+  const returns = account.value?.returns;
+  if (!returns) return "";
+  if (returns.twr_annualized !== null && returns.twr_annualized !== undefined) {
+    return `年化 ${pct(returns.twr_annualized)}`;
+  }
+  return returns.notes?.[0] || returns.basis;
+});
+const xirrHint = computed(() => {
+  const returns = account.value?.returns;
+  if (!returns) return "";
+  if (returns.xirr_status === "ok") return `已考虑 ${returns.flow_count} 笔外部现金流`;
+  return XIRR_STATUS_LABEL[returns.xirr_status] || returns.xirr_status;
+});
+const performanceMode = ref<"assets" | "returns">("assets");
+const benchmark = computed(() => performance.value?.benchmark || null);
+const hasBenchmarkSeries = computed(() => (benchmark.value?.series.length || 0) > 1);
+const performanceOption = computed<EChartsOption>(() => {
+  const points = performance.value?.points || [];
+  const twrIndex = performance.value?.returns?.twr_index || [];
+  if (performanceMode.value === "returns" && hasBenchmarkSeries.value && benchmark.value) {
+    return {
+      tooltip: { trigger: "axis" },
+      legend: { data: ["账户 TWR 累计", `${benchmark.value.index_name} 累计`] },
+      grid: { left: 60, right: 24, top: 40, bottom: 40 },
+      xAxis: { type: "category", data: benchmark.value.series.map((item) => item.point_date) },
+      yAxis: { type: "value", axisLabel: { formatter: "{value}%" } },
+      series: [
+        {
+          name: "账户 TWR 累计",
+          type: "line",
+          showSymbol: false,
+          data: benchmark.value.series.map((item) =>
+            item.account_index === null ? null : (Number(item.account_index) - 1) * 100
+          ),
+        },
+        {
+          name: `${benchmark.value.index_name} 累计`,
+          type: "line",
+          showSymbol: false,
+          data: benchmark.value.series.map((item) =>
+            item.benchmark_index === null ? null : (Number(item.benchmark_index) - 1) * 100
+          ),
+        },
+      ],
+    };
+  }
+  const hasTwr = twrIndex.length > 0 && twrIndex.length === points.length;
+  return {
+    tooltip: { trigger: "axis" },
+    legend: { data: hasTwr ? ["账户总资产", "净投入", "TWR 累计"] : ["账户总资产", "净投入"] },
+    grid: { left: 60, right: hasTwr ? 64 : 24, top: 40, bottom: 40 },
+    xAxis: { type: "category", data: points.map((point) => point.point_date) },
+    yAxis: [
+      { type: "value" },
+      { type: "value", axisLabel: { formatter: "{value}%" }, splitLine: { show: false } },
+    ],
+    series: [
+      { name: "账户总资产", type: "line", showSymbol: false, data: points.map((point) => Number(point.total_assets)) },
+      { name: "净投入", type: "line", showSymbol: false, data: points.map((point) => Number(point.net_invested)) },
+      ...(hasTwr
+        ? [{
+            name: "TWR 累计",
+            type: "line" as const,
+            yAxisIndex: 1,
+            showSymbol: false,
+            data: twrIndex.map((item) => (item.index === null ? null : (Number(item.index) - 1) * 100)),
+          }]
+        : []),
+    ],
+  };
+});
 
 function rowSummary(row: ImportPreviewRow): string {
   const parsed = row.parsed;
@@ -627,4 +723,5 @@ onMounted(load);
 .import-date { margin: 16px 0 4px; }
 .import-toolbar { margin: 12px 0 8px; }
 .performance-chart { margin-top: 12px; }
+.chart-mode { margin-top: 12px; }
 </style>

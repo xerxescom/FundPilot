@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     trade_calendar_refresh_days: int = 7
     fund_disclosure_grace_trade_days: int = 3
     market_data_grace_trade_days: int = 1
+    # 账户收益基线：默认对比沪深300
+    benchmark_index_code: str = "sh000300"
     batch_item_max_retries: int = 3
     batch_recovery_window_days: int = 3
     interrupted_requeue_delay_seconds: int = 30

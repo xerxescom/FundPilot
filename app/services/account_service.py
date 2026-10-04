@@ -14,8 +14,9 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.models import AssetPriceDaily, FundNav, PortfolioCashEvent, PortfolioPosition, PortfolioTransaction
-from app.services import asset_service, portfolio_service
+from app.services import asset_service, benchmark_service, portfolio_service, return_metrics
 
 CASH_EVENT_TYPES = {"deposit", "withdraw", "dividend", "interest", "fee", "adjustment", "opening_balance"}
 CASH_EVENT_LABELS = {
@@ -35,6 +36,7 @@ _OTHER_INCOME_TYPES = {"dividend", "interest", "fee", "adjustment"}
 MAX_PERFORMANCE_DAYS = 1095  # 3 年，超出时截断并在 coverage 中说明
 MAX_PERFORMANCE_POINTS = 1500
 RECONCILIATION_TOLERANCE = Decimal("0.01")
+RETURNS_BASIS = "twr_daily_linked + xirr_newton"
 
 
 # ---------------------------------------------------------------- 现金事件
@@ -245,7 +247,7 @@ def account_summary(db: Session) -> dict:
     if unrealized_total is None:
         notes.append("持仓估值不完整，未实现盈亏与恒等式核对暂不可用")
     if return_rate is not None:
-        notes.append("收益率按累计盈亏/净投入计算，尚未剔除出入金时点影响（TWR/MWR 后续）")
+        notes.append("收益率按累计盈亏/净投入计算，未剔除出入金时点影响；时间加权/资金加权收益见 returns")
     if overview["missing_price_assets"]:
         notes.append(f"{len(overview['missing_price_assets'])} 个持仓缺少行情，账户总资产按已知部分展示")
     if overview["missing_cost_assets"]:
@@ -273,7 +275,150 @@ def account_summary(db: Session) -> dict:
         "reconciliation_difference": reconciliation,
         "missing_price_assets": overview["missing_price_assets"],
         "notes": notes,
+        "returns": account_returns(db, include_index=False),
     }
+
+
+# ---------------------------------------------------------------- 账户收益（TWR / XIRR）
+
+
+def _returns_quality(is_complete: bool, coverage: dict) -> dict:
+    return {
+        "is_complete": bool(is_complete),
+        "cost_fallback_days": coverage.get("cost_fallback_days", 0),
+        "missing_price_assets": coverage.get("missing_price_assets", []),
+    }
+
+
+def _returns_block(
+    points: list[dict], *, is_complete: bool, coverage: dict, notes: list[str]
+) -> dict:
+    """从账户曲线推导 TWR（逐段连乘）与 XIRR（外部现金流取净投入的逐点变化）。
+
+    单段收益按期末口径：``(期末估值 − 当日外部流入) / 期初估值 − 1``。
+    净投入 = 期初投入 + 入金 − 出金，因此买卖/分红/利息/费用/调整都是内部收益，
+    不会被误当作现金流（与账户盈亏恒等式同口径）。
+    """
+    block_notes = list(notes)
+    quality = _returns_quality(is_complete, coverage)
+    if len(points) < 2:
+        block_notes.append(
+            "账户曲线点数不足，无法计算 TWR/XIRR" if points else "账户暂无任何事件，无法计算 TWR/XIRR"
+        )
+        return {
+            "status": "no_data",
+            "twr": None,
+            "twr_annualized": None,
+            "xirr": None,
+            "xirr_status": "insufficient_flows",
+            "twr_index": [],
+            "start_date": points[0]["point_date"] if points else None,
+            "end_date": points[-1]["point_date"] if points else None,
+            "days": 0,
+            "flow_count": 0,
+            "flow_total": Decimal("0"),
+            "quality": quality,
+            "notes": block_notes,
+            "basis": RETURNS_BASIS,
+        }
+
+    start_date = points[0]["point_date"]
+    end_date = points[-1]["point_date"]
+    days = (end_date - start_date).days
+    start_value = Decimal(points[0]["total_assets"])
+    xirr_flows: list[tuple[date, Decimal]] = []
+    if start_value > 0:
+        xirr_flows.append((start_date, -start_value))
+
+    sub_returns: list[Decimal | None] = []
+    index_points: list[dict] = [{"point_date": start_date, "index": Decimal("1")}]
+    index = Decimal("1")
+    skipped_segments = 0
+    truncated = False
+    flow_count = 0
+    flow_total = Decimal("0")
+
+    for position in range(1, len(points)):
+        previous_point = points[position - 1]
+        point = points[position]
+        flow = Decimal(point["net_invested"]) - Decimal(previous_point["net_invested"])
+        if flow != 0:
+            flow_count += 1
+            flow_total += flow
+            xirr_flows.append((point["point_date"], -flow))
+        segment = return_metrics.period_return(
+            Decimal(previous_point["total_assets"]), Decimal(point["total_assets"]), flow
+        )
+        if segment is None:
+            skipped_segments += 1
+            index_points.append({"point_date": point["point_date"], "index": None})
+            continue
+        factor = Decimal("1") + segment
+        if truncated or factor <= 0:
+            truncated = True
+            index_points.append({"point_date": point["point_date"], "index": None})
+            continue
+        sub_returns.append(segment)
+        index *= factor
+        index_points.append({"point_date": point["point_date"], "index": index})
+
+    if skipped_segments:
+        block_notes.append(
+            f"有 {skipped_segments} 段区间期初估值为 0（资金尚未投入），TWR 已跳过这些区间"
+        )
+    if truncated:
+        block_notes.append("出现过非正收益区间，TWR 已在该处停止连乘")
+    if quality["cost_fallback_days"]:
+        block_notes.append("存在按成本估值的日期，TWR/XIRR 与实际市值口径存在偏差")
+    if quality["missing_price_assets"]:
+        block_notes.append(
+            f"{len(quality['missing_price_assets'])} 个持仓缺少行情，收益指标按成本口径计算"
+        )
+
+    twr = return_metrics.link_returns(sub_returns)
+    if days >= return_metrics.MIN_ANNUALIZE_DAYS:
+        xirr_flows.append((end_date, Decimal(points[-1]["total_assets"])))
+        xirr_value, xirr_status = return_metrics.xirr(xirr_flows)
+        twr_annualized = return_metrics.annualize(twr, days)
+    else:
+        xirr_value, xirr_status = None, "short_window"
+        twr_annualized = None
+    if xirr_status != "ok":
+        label = return_metrics.XIRR_STATUS_LABELS.get(xirr_status, xirr_status)
+        block_notes.append(f"XIRR 与年化收益未计算：{label}")
+
+    return {
+        "status": "ok",
+        "twr": twr,
+        "twr_annualized": twr_annualized,
+        "xirr": xirr_value,
+        "xirr_status": xirr_status,
+        "twr_index": index_points,
+        "start_date": start_date,
+        "end_date": end_date,
+        "days": days,
+        "flow_count": flow_count,
+        "flow_total": portfolio_service._quantize(flow_total, "0.0001"),
+        "quality": quality,
+        "notes": block_notes,
+        "basis": RETURNS_BASIS,
+    }
+
+
+def account_returns(
+    db: Session,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+    performance: dict | None = None,
+    include_index: bool = True,
+) -> dict:
+    """账户收益指标（TWR/XIRR）；不传 performance 时自行回放账户曲线。"""
+    source = performance if performance is not None else account_performance(db, start=start, end=end)
+    returns = dict(source.get("returns") or {})
+    if not include_index:
+        returns.pop("twr_index", None)
+    return returns
 
 
 # ---------------------------------------------------------------- 账户曲线
@@ -330,7 +475,25 @@ def _position_has_transactions(db: Session, position: PortfolioPosition) -> bool
     )
 
 
-def account_performance(db: Session, start: date | None = None, end: date | None = None) -> dict:
+def _attach_benchmark(
+    db: Session, result: dict, include_benchmark: bool, index_code: str | None
+) -> dict:
+    if include_benchmark:
+        settings = get_settings()
+        result["benchmark"] = benchmark_service.compare_performance(
+            db, result, index_code=index_code or settings.benchmark_index_code
+        )
+    return result
+
+
+def account_performance(
+    db: Session,
+    start: date | None = None,
+    end: date | None = None,
+    *,
+    include_benchmark: bool = False,
+    benchmark_index_code: str | None = None,
+) -> dict:
     """账户资产曲线：现金 + 各持仓按最近收盘估值（尚无行情时用成本代替并标记不完整）。"""
     end = end or date.today()
     first_event = _first_event_date(db)
@@ -348,22 +511,32 @@ def account_performance(db: Session, start: date | None = None, end: date | None
     transactions = _all_transactions(db, end)
     cash_events = _all_cash_events(db, end)
     if first_event is None:
-        return {
-            "points": [],
-            "coverage": {
-                "start_date": None,
-                "end_date": end.isoformat(),
-                "points": 0,
-                "included_assets": 0,
-                "excluded_assets": [],
-                "cost_fallback_days": 0,
-                "missing_price_assets": [],
-            },
-            "is_complete": True,
-            "basis": "account_balance_replay",
-            "label": "账户资产重放（现金 + 持仓市值）",
-            "notes": ["账户暂无任何事件，曲线为空"],
+        empty_coverage = {
+            "start_date": None,
+            "end_date": end.isoformat(),
+            "points": 0,
+            "included_assets": 0,
+            "excluded_assets": [],
+            "cost_fallback_days": 0,
+            "missing_price_assets": [],
         }
+        empty_notes = ["账户暂无任何事件，曲线为空"]
+        return _attach_benchmark(
+            db,
+            {
+                "points": [],
+                "coverage": empty_coverage,
+                "is_complete": True,
+                "basis": "account_balance_replay",
+                "label": "账户资产重放（现金 + 持仓市值）",
+                "notes": empty_notes,
+                "returns": _returns_block(
+                    [], is_complete=True, coverage=empty_coverage, notes=empty_notes
+                ),
+            },
+            include_benchmark,
+            benchmark_index_code,
+        )
 
     # 每个资产的份额/成本与价格序列
     shares: dict[tuple[str, str], Decimal] = defaultdict(lambda: Decimal("0"))
@@ -444,18 +617,24 @@ def account_performance(db: Session, start: date | None = None, end: date | None
         elif event.event_type == "withdraw":
             withdrawals += -Decimal(event.amount)
         cash_index += 1
-    # 尚未物化的手工/截图持仓按纯函数推导计入初始状态
+    # 尚未物化的手工/截图持仓：<= start 的折进初值（start 可能恰好等于它的日期），
+    # > start 的作为有日期的期初事件参与回放。此前用 >= start 跳过会让这类持仓整体缺席，曲线记 0。
+    pending_events: list[dict] = []
     for position in portfolio_service.list_positions(db):
         if _position_has_transactions(db, position):
             continue
         values = portfolio_service.opening_values(position)
-        if values is None or values["trade_date"] >= start:
+        if values is None:
             continue
         key = portfolio_service._identity(position)
         ensure_asset(key)
-        shares[key] += Decimal(values["share"])
-        costs[key] += Decimal(values["amount"])
-        basis += Decimal(values["amount"])
+        if values["trade_date"] <= start:
+            shares[key] += Decimal(values["share"])
+            costs[key] += Decimal(values["amount"])
+            basis += Decimal(values["amount"])
+        elif values["trade_date"] <= end:
+            pending_events.append({"trade_date": values["trade_date"], "key": key, **values})
+    pending_events.sort(key=lambda item: item["trade_date"])
 
     # 日期集合：行情日 ∪ 事件日（区间内）
     date_set: set[date] = set()
@@ -469,13 +648,25 @@ def account_performance(db: Session, start: date | None = None, end: date | None
     for event in cash_events[cash_index:]:
         if event.event_date <= end:
             date_set.add(event.event_date)
+    for item in pending_events:
+        date_set.add(item["trade_date"])
     dates = sorted(date_set)
     if not dates:
         dates = [start]
 
     cost_fallback_days = 0
     points: list[dict] = []
+    pending_index = 0
     for current in dates:
+        while (
+            pending_index < len(pending_events)
+            and pending_events[pending_index]["trade_date"] <= current
+        ):
+            item = pending_events[pending_index]
+            shares[item["key"]] += Decimal(item["share"])
+            costs[item["key"]] += Decimal(item["amount"])
+            basis += Decimal(item["amount"])
+            pending_index += 1
         while tx_index < len(transactions) and transactions[tx_index].trade_date <= current:
             transaction = transactions[tx_index]
             key = _asset_key(transaction.asset_type or "fund", transaction.asset_code or transaction.fund_code)
@@ -546,19 +737,27 @@ def account_performance(db: Session, start: date | None = None, end: date | None
 
     included = sorted({key[1] for key in price_series if price_series[key]})
     excluded = sorted(set(missing_price_assets))
-    return {
-        "points": points,
-        "coverage": {
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
-            "points": len(points),
-            "included_assets": len(included),
-            "excluded_assets": excluded,
-            "cost_fallback_days": cost_fallback_days,
-            "missing_price_assets": excluded,
-        },
-        "is_complete": cost_fallback_days == 0 and not excluded,
-        "basis": "account_balance_replay",
-        "label": "账户资产重放（现金 + 持仓市值）",
-        "notes": notes,
+    coverage = {
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "points": len(points),
+        "included_assets": len(included),
+        "excluded_assets": excluded,
+        "cost_fallback_days": cost_fallback_days,
+        "missing_price_assets": excluded,
     }
+    is_complete = cost_fallback_days == 0 and not excluded
+    return _attach_benchmark(
+        db,
+        {
+            "points": points,
+            "coverage": coverage,
+            "is_complete": is_complete,
+            "basis": "account_balance_replay",
+            "label": "账户资产重放（现金 + 持仓市值）",
+            "notes": notes,
+            "returns": _returns_block(points, is_complete=is_complete, coverage=coverage, notes=notes),
+        },
+        include_benchmark,
+        benchmark_index_code,
+    )

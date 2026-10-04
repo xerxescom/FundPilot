@@ -469,6 +469,24 @@ export interface CashEvent {
   created_at: string;
 }
 
+export interface AccountReturns {
+  status: "ok" | "no_data";
+  twr?: Nullable<number>;
+  twr_annualized?: Nullable<number>;
+  xirr?: Nullable<number>;
+  xirr_status: string;
+  /** 逐点 TWR 指数（首点 1.0）；汇总接口不返回该字段 */
+  twr_index?: Array<{ point_date: string; index: Nullable<number> }>;
+  start_date?: Nullable<string>;
+  end_date?: Nullable<string>;
+  days: number;
+  flow_count: number;
+  flow_total: number;
+  quality: { is_complete: boolean; cost_fallback_days: number; missing_price_assets: string[] };
+  notes: string[];
+  basis: string;
+}
+
 export interface AccountSummary {
   as_of: string;
   valuation_status: "complete" | "partial" | "empty";
@@ -490,6 +508,63 @@ export interface AccountSummary {
   other_income_total: number;
   reconciliation_difference?: Nullable<number>;
   missing_price_assets: MissingAsset[];
+  notes: string[];
+  returns: AccountReturns;
+}
+
+export interface ReconcileRow {
+  nav_date: string;
+  akshare_unit_nav?: Nullable<number>;
+  eastmoney_unit_nav?: Nullable<number>;
+  akshare_daily_return?: Nullable<number>;
+  eastmoney_daily_return?: Nullable<number>;
+  unit_nav_diff?: Nullable<number>;
+  daily_return_diff?: Nullable<number>;
+  status?: Nullable<string>;
+}
+
+export interface ReconcileResult {
+  fund_code: string;
+  status: "ok" | "warning" | "failed" | "degraded";
+  summary: string;
+  source_errors?: { akshare?: Nullable<string>; eastmoney?: Nullable<string> };
+  counts?: {
+    akshare_missing: number;
+    eastmoney_missing: number;
+    unit_nav_diff: number;
+    daily_return_diff: number;
+  };
+  rows: ReconcileRow[];
+}
+
+export interface BenchmarkComparison {
+  index_code: string;
+  index_name: string;
+  status: "ok" | "no_index_data" | "insufficient_overlap";
+  coverage: {
+    start_date?: Nullable<string>;
+    end_date?: Nullable<string>;
+    aligned_days: number;
+    account_points: number;
+    index_points: number;
+    missing_index_days: number;
+    index_latest_date?: Nullable<string>;
+  };
+  metrics: {
+    account_cumulative?: Nullable<number>;
+    benchmark_cumulative?: Nullable<number>;
+    excess_return?: Nullable<number>;
+    account_annualized?: Nullable<number>;
+    benchmark_annualized?: Nullable<number>;
+    account_volatility?: Nullable<number>;
+    benchmark_volatility?: Nullable<number>;
+    account_max_drawdown?: Nullable<number>;
+    benchmark_max_drawdown?: Nullable<number>;
+    beta?: Nullable<number>;
+    alpha?: Nullable<number>;
+    correlation?: Nullable<number>;
+  };
+  series: Array<{ point_date: string; account_index: Nullable<number>; benchmark_index: Nullable<number> }>;
   notes: string[];
 }
 
@@ -518,6 +593,8 @@ export interface AccountPerformance {
   basis: string;
   label: string;
   notes: string[];
+  returns: AccountReturns;
+  benchmark?: BenchmarkComparison;
 }
 
 export interface BatchCoverage {

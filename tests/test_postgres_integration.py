@@ -301,3 +301,52 @@ def test_portfolio_import_schema_and_dedup_on_postgres(pg_session):
     delta = summary["cash_balance"] - before_cash
     assert delta == Decimal("5000.0000") - Decimal("15005") + Decimal("3199")
     assert PortfolioCashEvent is not None and PortfolioImportBatch is not None
+
+
+def test_import_rollback_on_postgres(pg_session):
+    from app.services import csv_import_service
+
+    message = (
+        "成交日期,证券代码,证券名称,业务名称,成交价格,成交数量,成交金额,手续费,成交编号\n"
+        "2026-06-01,600888,新疆众和,证券买入,1500,10,15000,5,PG-RB-1\n"
+    ).encode("utf-8")
+    preview = csv_import_service.preview_import(pg_session, file_name="pg_rb.csv", content=message)
+    rows = [
+        row
+        for row in preview["rows"]
+        if row.get("status") in {"ok", "suspect"} and row.get("target") in {"trade", "cash"}
+    ]
+    csv_import_service.commit_import(pg_session, batch_id=preview["batch_id"], rows=rows)
+
+    result = csv_import_service.rollback_import(
+        pg_session, batch_id=preview["batch_id"], reason="集成测试"
+    )
+    assert result["status"] == "rolled_back"
+    assert result["counts"]["transactions"] == 1
+
+    # 回滚释放 external_ref 唯一索引：同一文件重新预览不再判重，可再次入账
+    again = csv_import_service.preview_import(pg_session, file_name="pg_rb.csv", content=message)
+    assert again["counts"]["duplicate"] == 0
+    again_rows = [
+        row
+        for row in again["rows"]
+        if row.get("status") in {"ok", "suspect"} and row.get("target") in {"trade", "cash"}
+    ]
+    recommitted = csv_import_service.commit_import(
+        pg_session, batch_id=again["batch_id"], rows=again_rows
+    )
+    assert recommitted["counts"]["imported"] == 1
+
+
+def test_account_returns_block_on_postgres(pg_session):
+    from app.services import account_service
+
+    performance = account_service.account_performance(pg_session)
+    returns = performance["returns"]
+
+    assert returns["basis"] == "twr_daily_linked + xirr_newton"
+    assert {"status", "twr", "xirr", "twr_index", "quality", "notes"} <= set(returns)
+    # NUMERIC 往返：Decimal 或 None，不出现 float
+    assert returns["twr"] is None or isinstance(returns["twr"], Decimal)
+    assert returns["xirr"] is None or isinstance(returns["xirr"], Decimal)
+    assert isinstance(returns["flow_total"], Decimal)
