@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # 固定版本 uv，依赖用 uv.lock 冻结安装（与本地/CI 完全一致）
 COPY --from=ghcr.io/astral-sh/uv:0.12.9 /uv /uvx /bin/
